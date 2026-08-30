@@ -17,7 +17,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Reconstruct and unpack application
+      - name: Reconstruct and salvage application archive
         shell: bash
         run: |
           set -euo pipefail
@@ -25,13 +25,68 @@ jobs:
           base64 --decode /tmp/kingfisher-source.b64 > /tmp/kingfisher-source.zip
           rm -rf /tmp/kingfisher-unpacked
           mkdir -p /tmp/kingfisher-unpacked
-          unzip -q /tmp/kingfisher-source.zip -d /tmp/kingfisher-unpacked
+
+          python3 - <<'PY'
+          import binascii
+          import pathlib
+          import struct
+          import zlib
+
+          src = pathlib.Path('/tmp/kingfisher-source.zip').read_bytes()
+          out = pathlib.Path('/tmp/kingfisher-unpacked')
+          off = 0
+          recovered = []
+
+          while off + 30 <= len(src):
+              if src[off:off+4] != b'PK\x03\x04':
+                  break
+              sig, ver, flags, method, mtime, mdate, crc, csize, usize, nlen, xlen = struct.unpack_from('<IHHHHHIIIHH', src, off)
+              name_start = off + 30
+              name_end = name_start + nlen
+              data_start = name_end + xlen
+              data_end = data_start + csize
+              if data_end > len(src):
+                  print(f'Truncated entry at byte {off}; stopping salvage.')
+                  break
+              name = src[name_start:name_end].decode('utf-8')
+              rel = pathlib.PurePosixPath(name)
+              if rel.is_absolute() or '..' in rel.parts:
+                  raise RuntimeError(f'Unsafe archive path: {name}')
+              target = out.joinpath(*rel.parts)
+              if name.endswith('/'):
+                  target.mkdir(parents=True, exist_ok=True)
+              else:
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  comp = src[data_start:data_end]
+                  if method == 0:
+                      payload = comp
+                  elif method == 8:
+                      payload = zlib.decompress(comp, -15)
+                  else:
+                      raise RuntimeError(f'Unsupported compression method {method} for {name}')
+                  if len(payload) != usize:
+                      raise RuntimeError(f'Size mismatch for {name}: {len(payload)} != {usize}')
+                  if (binascii.crc32(payload) & 0xffffffff) != crc:
+                      raise RuntimeError(f'CRC mismatch for {name}')
+                  target.write_bytes(payload)
+              recovered.append(name)
+              off = data_end
+
+          print(f'Recovered {len(recovered)} complete entries from {len(src)} bytes.')
+          for name in recovered:
+              print(name)
+          PY
+
           APP_ROOT="$(find /tmp/kingfisher-unpacked -mindepth 1 -maxdepth 1 -type d | head -n 1)"
           test -n "$APP_ROOT"
           test -f "$APP_ROOT/package.json"
+          test -d "$APP_ROOT/app"
+          test -f "$APP_ROOT/app/components/KingfisherGame.jsx"
+          test -f "$APP_ROOT/app/lib/KingfisherGameEngine.js"
+
           cp -a "$APP_ROOT"/. ./
-          test -f package.json
-          test -d app
+          rm -f vercel.json scripts/vercel-unpack.sh
+          rmdir scripts 2>/dev/null || true
 
       - name: Commit deployable source to main
         shell: bash
