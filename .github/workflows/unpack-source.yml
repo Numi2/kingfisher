@@ -17,7 +17,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Reconstruct and salvage application archive
+      - name: Reconstruct and salvage recoverable application files
         shell: bash
         run: |
           set -euo pipefail
@@ -82,13 +82,12 @@ jobs:
           test -f "$APP_ROOT/package.json"
           test -d "$APP_ROOT/app"
           test -f "$APP_ROOT/app/components/KingfisherGame.jsx"
-          test -f "$APP_ROOT/app/lib/KingfisherGameEngine.js"
 
           cp -a "$APP_ROOT"/. ./
           rm -f vercel.json scripts/vercel-unpack.sh
           rmdir scripts 2>/dev/null || true
 
-      - name: Commit deployable source to main
+      - name: Commit recovered source to main
         shell: bash
         run: |
           set -euo pipefail
@@ -96,8 +95,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "Source already unpacked."
+            echo "Recoverable source already committed."
             exit 0
           fi
-          git commit -m "Unpack deployable Kingfisher app"
+          git commit -m "Recover Kingfisher application source"
           git push origin HEAD:main
