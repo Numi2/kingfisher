@@ -1,0 +1,48 @@
+name: Unpack deployable source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".source/**"
+      - ".github/workflows/unpack-source.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Reconstruct and unpack application
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .source/part-* > /tmp/kingfisher-source.b64
+          base64 --decode /tmp/kingfisher-source.b64 > /tmp/kingfisher-source.zip
+          rm -rf /tmp/kingfisher-unpacked
+          mkdir -p /tmp/kingfisher-unpacked
+          unzip -q /tmp/kingfisher-source.zip -d /tmp/kingfisher-unpacked
+          APP_ROOT="$(find /tmp/kingfisher-unpacked -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -n "$APP_ROOT"
+          test -f "$APP_ROOT/package.json"
+          cp -a "$APP_ROOT"/. ./
+          test -f package.json
+          test -d app
+
+      - name: Commit deployable source to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Source already unpacked."
+            exit 0
+          fi
+          git commit -m "Unpack deployable Kingfisher app"
+          git push origin HEAD:main
