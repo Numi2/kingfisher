@@ -761,7 +761,7 @@ export class KingfisherGameEngine {
 
   setFlapping(value) {
     this.pointerFlap = Boolean(value);
-    if (value) this._cancelCommittedDive(false);
+    if (value) this._cancelCommittedDive(true);
   }
 
   _cancelCommittedDive(clearTarget = true) {
@@ -1069,13 +1069,13 @@ export class KingfisherGameEngine {
     const underwater = this.bird.position.y < WATER_Y - 0.06;
     this.previousBirdPosition.copy(this.bird.position);
 
-    if (input.flap && this.smartDiveCommit) this._cancelCommittedDive(false);
+    if (input.flap && this.smartDiveCommit) this._cancelCommittedDive(true);
     if (input.dive && !this.holdingFish && !this.lockedTarget?.visible) this._chooseFishTarget(true);
     if (input.dive && this.currentTarget?.visible && !this.lockedTarget) this.lockedTarget = this.currentTarget;
 
     const sensitivity = this.controlSettings.sensitivity;
     const yawRate = underwater ? 1.0 : lerp(1.05, 1.48, clamp(this.speed / AIR_DIVE, 0, 1));
-    this.yaw -= input.x * yawRate * sensitivity * dt;
+    this.yaw += input.x * yawRate * sensitivity * dt;
     this.bank = lerp(this.bank, -input.x * MAX_BANK * clamp(this.speed / 14, 0.55, 1), smooth(5.5, dt));
 
     let targetPitch = input.y * (underwater ? 0.52 : 0.46) * sensitivity;
