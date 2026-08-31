@@ -1,5 +1,5 @@
 name: Final Smooth Kingfisher Flight v3
-# Verification pass 5: full Chromium engine readiness and direct controls.
+# Verification pass 6: zero residual steering on stick release.
 
 on:
   push:
@@ -41,6 +41,13 @@ jobs:
 
           engine_path = Path('app/lib/KingfisherGameEngine.js')
           engine = engine_path.read_text()
+
+          old_steering = '''  setSteering(x = 0, y = 0) {\n    this.steering.x = clamp(Number(x) || 0, -1, 1);\n    this.steering.y = clamp(Number(y) || 0, -1, 1);\n  }'''
+          new_steering = '''  setSteering(x = 0, y = 0) {\n    const nextX = clamp(Number(x) || 0, -1, 1);\n    const nextY = clamp(Number(y) || 0, -1, 1);\n    this.steering.x = nextX;\n    this.steering.y = nextY;\n    if (Math.abs(nextX) < 0.001 && Math.abs(nextY) < 0.001) {\n      this.filteredSteering.x = 0;\n      this.filteredSteering.y = 0;\n      this.yawVelocity *= 0.28;\n      this.pitchVelocity *= 0.28;\n    }\n  }'''
+          if old_steering not in engine:
+              raise SystemExit('setSteering pattern not found')
+          engine = engine.replace(old_steering, new_steering, 1)
+
           anchor = '    this.renderer?.dispose?.();'
           clear = '    if (makeFish.cache) makeFish.cache.clear();\n'
           if clear not in engine:
