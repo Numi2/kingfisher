@@ -1,0 +1,46 @@
+name: Deploy Kingfisher to Vercel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/deploy-vercel.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify Vercel credential
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "VERCEL_TOKEN GitHub Actions secret is not configured for this repository."
+            exit 2
+          fi
+
+      - name: Deploy main to Vercel production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes vercel@latest --prod --yes \
+            --scope numi2s-projects \
+            --token "$VERCEL_TOKEN" 2>&1 | tee /tmp/vercel-deploy.log
+          URL="$(grep -Eo 'https://[^[:space:]]+\.vercel\.app' /tmp/vercel-deploy.log | tail -n 1 || true)"
+          if [ -n "$URL" ]; then
+            echo "Production URL: $URL"
+          fi
