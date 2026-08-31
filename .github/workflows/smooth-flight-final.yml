@@ -85,6 +85,6 @@ jobs:
             .github/workflows/smooth-flight-retry.yml \
             .github/workflows/smooth-flight-final.yml \
             verify-kingfisher.cjs
-          git add app/lib/KingfisherGameEngine.js app/components/KingfisherGame.jsx app/components/VirtualJoystick.jsx app/api/health/route.js package.json
+          git add app/lib/KingfisherGameEngine.js app/components/KingfisherGame.jsx app/components/VirtualJoystick.jsx app/api/health/route.js app/layout.js package.json
           git commit -m "Replace clunky flight with smooth player-authoritative controller"
           git push origin HEAD:smooth-flight-v3
