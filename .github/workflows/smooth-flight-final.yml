@@ -65,7 +65,7 @@ jobs:
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
           READY=0
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:3000/ >/dev/null; then READY=1; break; fi
+            if curl -fsS http://localhost:3000/ >/dev/null; then READY=1; break; fi
             sleep 1
           done
           if [ "$READY" -ne 1 ]; then cat /tmp/kingfisher-server.log; exit 1; fi
