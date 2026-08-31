@@ -6,21 +6,26 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 function responseCurve(value) {
   const magnitude = Math.abs(value);
-  if (magnitude < 0.055) return 0;
-  const normalized = (magnitude - 0.055) / 0.945;
-  return Math.sign(value) * (0.18 * normalized + 0.82 * Math.pow(normalized, 1.42));
+  if (magnitude < 0.025) return 0;
+  const normalized = clamp((magnitude - 0.025) / 0.975, 0, 1);
+  return Math.sign(value) * (0.52 * normalized + 0.48 * normalized * normalized);
 }
 
 export default function VirtualJoystick({ onChange, disabled = false }) {
   const zoneRef = useRef(null);
+  const baseRef = useRef(null);
+  const knobRef = useRef(null);
   const pointerRef = useRef(null);
   const anchorRef = useRef(null);
   const [anchor, setAnchor] = useState(null);
-  const [knob, setKnob] = useState({ x: 0, y: 0 });
   const [active, setActive] = useState(false);
 
+  const setKnob = (x, y) => {
+    if (knobRef.current) knobRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+  };
+
   const emit = (dx, dy, radius) => {
-    onChange?.(responseCurve(dx / radius), responseCurve(-dy / radius));
+    onChange?.(responseCurve(dx / radius), responseCurve(-dy / radius) * 0.92);
   };
 
   const update = (event) => {
@@ -28,15 +33,26 @@ export default function VirtualJoystick({ onChange, disabled = false }) {
     const anchorPoint = anchorRef.current;
     if (!zone || !anchorPoint) return;
     const rect = zone.getBoundingClientRect();
-    const radius = clamp(Math.min(rect.width, rect.height) * 0.21, 52, 72);
+    const radius = clamp(Math.min(rect.width, rect.height) * 0.23, 58, 82);
     let dx = event.clientX - rect.left - anchorPoint.x;
     let dy = event.clientY - rect.top - anchorPoint.y;
-    const distance = Math.hypot(dx, dy);
+    let distance = Math.hypot(dx, dy);
+
+    if (distance > radius * 1.08) {
+      const follow = distance - radius;
+      anchorPoint.x = clamp(anchorPoint.x + (dx / distance) * follow, radius, Math.max(radius, rect.width - radius));
+      anchorPoint.y = clamp(anchorPoint.y + (dy / distance) * follow, radius, Math.max(radius, rect.height - radius));
+      setAnchor({ ...anchorPoint });
+      dx = event.clientX - rect.left - anchorPoint.x;
+      dy = event.clientY - rect.top - anchorPoint.y;
+      distance = Math.hypot(dx, dy);
+    }
+
     if (distance > radius) {
       dx = (dx / distance) * radius;
       dy = (dy / distance) * radius;
     }
-    setKnob({ x: dx, y: dy });
+    setKnob(dx, dy);
     emit(dx, dy, radius);
   };
 
@@ -46,7 +62,7 @@ export default function VirtualJoystick({ onChange, disabled = false }) {
     anchorRef.current = null;
     setActive(false);
     setAnchor(null);
-    setKnob({ x: 0, y: 0 });
+    setKnob(0, 0);
     onChange?.(0, 0);
   };
 
@@ -66,21 +82,21 @@ export default function VirtualJoystick({ onChange, disabled = false }) {
         if (disabled || pointerRef.current !== null) return;
         event.preventDefault();
         const rect = event.currentTarget.getBoundingClientRect();
-        const safe = clamp(Math.min(rect.width, rect.height) * 0.24, 66, 90);
+        const safe = clamp(Math.min(rect.width, rect.height) * 0.25, 72, 96);
         const nextAnchor = {
-          x: clamp(event.clientX - rect.left, safe, Math.max(safe, rect.width - safe)),
-          y: clamp(event.clientY - rect.top, safe, Math.max(safe, rect.height - safe)),
+x: clamp(event.clientX - rect.left, safe, Math.max(safe, rect.width - safe)),
+y: clamp(event.clientY - rect.top, safe, Math.max(safe, rect.height - safe)),
         };
         pointerRef.current = event.pointerId;
         anchorRef.current = nextAnchor;
         event.currentTarget.setPointerCapture?.(event.pointerId);
         setAnchor(nextAnchor);
         setActive(true);
-        setKnob({ x: 0, y: 0 });
+        setKnob(0, 0);
         onChange?.(0, 0);
       }}
       onPointerMove={(event) => {
-        if (!active || pointerRef.current !== event.pointerId) return;
+        if (pointerRef.current !== event.pointerId) return;
         event.preventDefault();
         update(event);
       }}
@@ -89,6 +105,7 @@ export default function VirtualJoystick({ onChange, disabled = false }) {
       onLostPointerCapture={release}
     >
       <div
+        ref={baseRef}
         className={`joystick-base ${active ? "active" : ""}`}
         style={anchor ? { left: `${anchor.x}px`, top: `${anchor.y}px`, bottom: "auto" } : undefined}
       >
@@ -96,9 +113,7 @@ export default function VirtualJoystick({ onChange, disabled = false }) {
         <span className="joystick-axis vertical" />
         <span className="joystick-orbit outer" />
         <span className="joystick-orbit inner" />
-        <div className="joystick-knob" style={{ transform: `translate3d(${knob.x}px, ${knob.y}px, 0)` }}>
-          <span />
-        </div>
+        <div ref={knobRef} className="joystick-knob"><span /></div>
       </div>
     </div>
   );
