@@ -15,11 +15,20 @@ const { chromium } = require('playwright');
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
+  const failedRequests = [];
   page.on('pageerror', error => errors.push(String(error)));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('requestfailed', request => failedRequests.push(`${request.url()} :: ${request.failure()?.errorText || 'failed'}`));
 
-  await page.goto('http://127.0.0.1:3000/?debug=1', { waitUntil: 'networkidle' });
-  await page.waitForSelector('canvas, .fatal-screen', { timeout: 15000 });
+  await page.goto('http://localhost:3000/?debug=1', { waitUntil: 'networkidle' });
+  try {
+    await page.waitForSelector('canvas, .fatal-screen', { timeout: 15000 });
+  } catch (error) {
+    console.error('BODY', (await page.locator('body').innerText()).slice(0, 2000));
+    console.error('FAILED_REQUESTS', failedRequests);
+    console.error('BROWSER_ERRORS', errors);
+    throw error;
+  }
   const fatal = await page.$('.fatal-screen');
   if (fatal) throw new Error(`Renderer failed: ${await fatal.innerText()}`);
   assert.ok(await page.$('canvas'), 'WebGL canvas did not render');
@@ -75,6 +84,7 @@ const { chromium } = require('playwright');
     return [e.yaw, e.pitch, e.yawVelocity, e.pitchVelocity, e.speed, ...e.camera.position.toArray()].every(Number.isFinite);
   }), true, 'dive destabilized flight state');
   assert.deepEqual(errors, [], `browser errors: ${errors.join(' | ')}`);
+  assert.deepEqual(failedRequests, [], `failed requests: ${failedRequests.join(' | ')}`);
   await page.screenshot({ path: '/tmp/kingfisher-v3-browser.png' });
   await browser.close();
   console.log(JSON.stringify({ yawChange, state: after, smartDiveToggle: true }));
