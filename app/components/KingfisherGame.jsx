@@ -301,7 +301,7 @@ export default function KingfisherGame() {
   const controlsVisible = ["playing", "countdown"].includes(gameState);
   const paused = gameState === "paused";
   const countdownText = hud.countdown > 0 ? String(Math.ceil(hud.countdown)) : "HUNT";
-  const targetAction = hud.targetKind === "perch" ? "BANK THE CATCH" : hud.targetKind === "fish" ? "HOLD DIVE TO STRIKE" : "SEARCH THE RIVER";
+  const targetAction = hud.targetKind === "perch" ? "BANK THE CATCH" : hud.targetKind === "fish" ? hud.targetLocked ? "LOCKED · COMMITTING" : settings.smartDive ? "TAP DIVE TO STRIKE" : "HOLD DIVE TO STRIKE" : "SEARCH THE RIVER";
 
   return (
     <main className={`game-shell state-${gameState} ${hud.energy < 0.16 ? "low-energy" : ""} ${hud.underwater && hud.air < 0.28 ? "low-air" : ""} ${hud.focusActive ? "focus-active" : ""}`}>
@@ -355,11 +355,11 @@ export default function KingfisherGame() {
             {hud.timeBonus > 0 ? <span className="time-pill">+{hud.timeBonus.toFixed(1)}s HUNT TIME</span> : null}
           </div>
 
-          {hud.holdingFish ? <div className="catch-banner"><strong>{hud.holdingFish}</strong><span>FLY THROUGH A GOLD PERCH TO SWALLOW IT</span></div> : null}
+          {hud.holdingFish ? <div className="catch-banner"><strong>{hud.holdingFish}</strong><span>FLAP TO SURFACE · THEN FLY THROUGH A GOLD PERCH TO BANK IT</span></div> : null}
           {hud.offCourse ? <div className="off-course-warning">RETURN TO THE RIVER</div> : null}
 
           {marker ? (
-            <div className={`target-marker ${marker.inside ? "inside" : "edge"} ${hud.targetKind}`} style={{ left: marker.left, top: marker.top }}>
+            <div className={`target-marker ${marker.inside ? "inside" : "edge"} ${hud.targetKind} ${hud.targetLocked ? "locked" : ""}`} style={{ left: marker.left, top: marker.top }}>
               <i style={{ transform: `rotate(${marker.angle}deg)` }}>➤</i>
               <span>{Math.round(hud.targetDistance)}m · {targetAction}</span>
             </div>
@@ -484,7 +484,7 @@ export default function KingfisherGame() {
               <button type="button" className="back-button" onClick={() => setMenuView("home")}>← BACK</button>
               <div className="menu-kicker">KINGFISHER CONTROLS</div>
               <h2>SET THE RESPONSE</h2>
-              <p>Drag anywhere in the lower-left zone to steer. Hold Dive to lock onto the selected fish and accelerate downward. Hold Flap to burst forward, climb, or escape the water.</p>
+              <p>Drag anywhere in the lower-left zone to steer. With Smart Dive on, tap Dive once to lock and commit to the selected fish. Press Flap at any time to break the dive, burst upward, or escape the water.</p>
               <div className="control-presets">
                 <button type="button" onClick={() => applyPreset("assisted")}><strong>ASSISTED</strong><span>Strong fish lock</span></button>
                 <button type="button" className="recommended" onClick={() => applyPreset("natural")}><strong>NATURAL</strong><span>Recommended</span></button>

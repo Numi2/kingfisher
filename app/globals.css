@@ -71,6 +71,8 @@ button { -webkit-tap-highlight-color: transparent; }
 .target-marker { position: absolute; z-index: 9; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 3px; pointer-events: none; }
 .target-marker i { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid rgba(126,233,239,.6); border-radius: 50%; background: rgba(4,26,31,.56); color: var(--cyan); font-style: normal; }
 .target-marker.perch i { color: var(--gold); border-color: rgba(242,192,91,.7); }
+.target-marker.locked i { color: var(--gold); border-color: rgba(242,192,91,.95); background: rgba(66,45,8,.72); box-shadow: 0 0 22px rgba(242,192,91,.34); }
+.target-marker.locked span { color: #ffe6a3; border: 1px solid rgba(242,192,91,.42); }
 .target-marker span { padding: 4px 7px; border-radius: 999px; background: rgba(2,15,20,.68); font-size: 8px; font-weight: 900; letter-spacing: .06em; white-space: nowrap; }
 
 .mobile-flight-controls { position: absolute; z-index: 12; left: 0; right: 0; bottom: max(12px, env(safe-area-inset-bottom)); height: min(39vh, 330px); pointer-events: none; }
