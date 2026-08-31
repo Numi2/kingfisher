@@ -383,7 +383,6 @@ export class KingfisherGameEngine {
     this.diveCaught = false;
     this.diveStartHeight = 0;
     this.lastCatchAt = -Infinity;
-    this.lastSplashAt = -Infinity;
 
     this.audioContext = null;
     this.score = 0;
@@ -434,11 +433,7 @@ export class KingfisherGameEngine {
   }
 
   _initRenderer() {
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      powerPreference: "high-performance",
-      alpha: false,
-    });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;
@@ -466,15 +461,9 @@ export class KingfisherGameEngine {
     this.scene.clear();
     this.decor = [];
 
-    const sky = new THREE.Mesh(
-      new THREE.SphereGeometry(340, 28, 16),
-      new THREE.MeshBasicMaterial({ color: 0x83bdd0, side: THREE.BackSide, fog: false }),
-    );
-    this.sky = sky;
-    this.scene.add(sky);
-
-    const hemi = new THREE.HemisphereLight(0xd9f4ff, 0x34462f, 2.15);
-    this.scene.add(hemi);
+    this.sky = new THREE.Mesh(new THREE.SphereGeometry(340, 28, 16), new THREE.MeshBasicMaterial({ color: 0x83bdd0, side: THREE.BackSide, fog: false }));
+    this.scene.add(this.sky);
+    this.scene.add(new THREE.HemisphereLight(0xd9f4ff, 0x34462f, 2.15));
 
     const sun = new THREE.DirectionalLight(0xffedca, 3.45);
     sun.position.set(-32, 46, 16);
@@ -502,10 +491,7 @@ export class KingfisherGameEngine {
       riverbedPosition.setZ(i, Math.sin(y * 0.07) * 0.12 + Math.cos(x * 0.8 + y * 0.025) * 0.08);
     }
     riverbedGeometry.computeVertexNormals();
-    const riverbed = new THREE.Mesh(
-      riverbedGeometry,
-      new THREE.MeshStandardMaterial({ color: 0x5f6b5d, roughness: 0.96, metalness: 0.02 }),
-    );
+    const riverbed = new THREE.Mesh(riverbedGeometry, new THREE.MeshStandardMaterial({ color: 0x5f6b5d, roughness: 0.96, metalness: 0.02 }));
     riverbed.rotation.x = -Math.PI / 2;
     riverbed.position.y = RIVERBED_Y;
     riverbed.receiveShadow = true;
@@ -527,12 +513,11 @@ export class KingfisherGameEngine {
     });
     const waterGeometry = new THREE.PlaneGeometry(RIVER_HALF_WIDTH * 2, WORLD_HALF_LENGTH * 2, 24, 128);
     this.waterBase = Float32Array.from(waterGeometry.attributes.position.array);
-    const water = new THREE.Mesh(waterGeometry, this.waterMaterial);
-    water.rotation.x = -Math.PI / 2;
-    water.position.y = WATER_Y;
-    water.receiveShadow = true;
-    this.water = water;
-    this.scene.add(water);
+    this.water = new THREE.Mesh(waterGeometry, this.waterMaterial);
+    this.water.rotation.x = -Math.PI / 2;
+    this.water.position.y = WATER_Y;
+    this.water.receiveShadow = true;
+    this.scene.add(this.water);
 
     const bankMaterial = new THREE.MeshStandardMaterial({ color: 0x4f713d, roughness: 0.96 });
     const soilMaterial = new THREE.MeshStandardMaterial({ color: 0x6f6047, roughness: 0.98 });
@@ -544,8 +529,7 @@ export class KingfisherGameEngine {
         const z = pos.getY(i);
         const edgeDistance = side < 0 ? x + 11 : 11 - x;
         const undulation = Math.sin(z * 0.045 + side) * 0.45 + Math.sin(z * 0.13) * 0.16;
-        const rise = clamp(edgeDistance / 7, 0, 1) * 1.2;
-        pos.setZ(i, rise + undulation * clamp(edgeDistance / 5, 0.2, 1));
+        pos.setZ(i, clamp(edgeDistance / 7, 0, 1) * 1.2 + undulation * clamp(edgeDistance / 5, 0.2, 1));
       }
       bankGeometry.computeVertexNormals();
       const bank = new THREE.Mesh(bankGeometry, bankMaterial);
@@ -568,9 +552,8 @@ export class KingfisherGameEngine {
     for (let i = 0; i < 105; i += 1) {
       const underwater = Math.random() < 0.58;
       const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(rand(0.16, underwater ? 0.58 : 0.9), 0), stoneMaterials[i % stoneMaterials.length]);
-      if (underwater) {
-        stone.position.set(rand(-RIVER_HALF_WIDTH + 0.5, RIVER_HALF_WIDTH - 0.5), rand(RIVERBED_Y + 0.2, RIVERBED_Y + 0.65), rand(-WORLD_HALF_LENGTH, WORLD_HALF_LENGTH));
-      } else {
+      if (underwater) stone.position.set(rand(-RIVER_HALF_WIDTH + 0.5, RIVER_HALF_WIDTH - 0.5), rand(RIVERBED_Y + 0.2, RIVERBED_Y + 0.65), rand(-WORLD_HALF_LENGTH, WORLD_HALF_LENGTH));
+      else {
         const side = Math.random() < 0.5 ? -1 : 1;
         stone.position.set(side * rand(RIVER_HALF_WIDTH + 1.2, RIVER_HALF_WIDTH + 7), rand(-0.5, 0.5), rand(-WORLD_HALF_LENGTH, WORLD_HALF_LENGTH));
       }
@@ -623,26 +606,19 @@ export class KingfisherGameEngine {
       this.decor.push(cloud);
     }
 
-    this.perches = [
-      makePerch(45, -1),
-      makePerch(-18, 1),
-      makePerch(-88, -1),
-      makePerch(118, 1),
-    ];
+    this.perches = [makePerch(45, -1), makePerch(-18, 1), makePerch(-88, -1), makePerch(118, 1)];
     this.perches.forEach((perch) => this.scene.add(perch));
 
     this.bird = makeBird();
     this.scene.add(this.bird);
 
-    const targetMaterial = new THREE.MeshBasicMaterial({ color: 0x6beaf3, transparent: true, opacity: 0.86, depthTest: false });
-    this.targetRing = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.045, 10, 34), targetMaterial);
+    this.targetRing = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.045, 10, 34), new THREE.MeshBasicMaterial({ color: 0x6beaf3, transparent: true, opacity: 0.86, depthTest: false }));
     this.targetRing.rotation.x = Math.PI / 2;
     this.targetRing.visible = false;
     this.targetRing.renderOrder = 20;
     this.scene.add(this.targetRing);
 
-    const lockMaterial = new THREE.MeshBasicMaterial({ color: 0xffd46b, transparent: true, opacity: 0.9, depthTest: false });
-    this.lockRing = new THREE.Mesh(new THREE.TorusGeometry(0.92, 0.035, 10, 34), lockMaterial);
+    this.lockRing = new THREE.Mesh(new THREE.TorusGeometry(0.92, 0.035, 10, 34), new THREE.MeshBasicMaterial({ color: 0xffd46b, transparent: true, opacity: 0.9, depthTest: false }));
     this.lockRing.rotation.x = Math.PI / 2;
     this.lockRing.visible = false;
     this.lockRing.renderOrder = 21;
@@ -657,8 +633,7 @@ export class KingfisherGameEngine {
     this.fish = [];
     const count = clamp(Math.round(60 * this.habitat.fishDensity), 32, 100);
     for (let index = 0; index < count; index += 1) {
-      const type = weightedFishType(this.habitat.biodiversity);
-      const fish = makeFish(type);
+      const fish = makeFish(weightedFishType(this.habitat.biodiversity));
       this._placeFish(fish, true, index);
       this.scene.add(fish);
       this.fish.push(fish);
@@ -668,10 +643,7 @@ export class KingfisherGameEngine {
   _placeFish(fish, randomZ = false, index = 999) {
     const type = fish.userData.type;
     const depth = rand(type.depth[0], type.depth[1]);
-    let z;
-    if (randomZ && index < 14) z = rand(-24, 24);
-    else if (randomZ) z = rand(-WORLD_HALF_LENGTH, WORLD_HALF_LENGTH);
-    else z = this._wrapZ(this.bird.position.z - rand(55, 125));
+    const z = randomZ ? (index < 14 ? rand(-24, 24) : rand(-WORLD_HALF_LENGTH, WORLD_HALF_LENGTH)) : this._wrapZ(this.bird.position.z - rand(55, 125));
     const x = index < 14 ? rand(-5.2, 5.2) : rand(-RIVER_HALF_WIDTH + 0.9, RIVER_HALF_WIDTH - 0.9);
     fish.position.set(x, -depth, z);
     fish.userData.baseX = fish.position.x;
@@ -684,9 +656,7 @@ export class KingfisherGameEngine {
   _bindEvents() {
     this._onResize = () => this._resize();
     this._onBlur = () => this._clearTransientInput();
-    this._onVisibility = () => {
-      if (document.hidden) this._clearTransientInput();
-    };
+    this._onVisibility = () => { if (document.hidden) this._clearTransientInput(); };
     this._onKeyDown = (event) => {
       this.keys.add(event.code);
       if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) event.preventDefault();
@@ -697,7 +667,7 @@ export class KingfisherGameEngine {
     };
     this._onKeyUp = (event) => {
       this.keys.delete(event.code);
-      if (event.code === "ShiftLeft" || event.code === "ShiftRight") this._endDiveButton();
+      if ((event.code === "ShiftLeft" || event.code === "ShiftRight") && !this.keys.has("ShiftLeft") && !this.keys.has("ShiftRight")) this._endDiveButton();
     };
     window.addEventListener("resize", this._onResize, { passive: true });
     window.addEventListener("blur", this._onBlur, { passive: true });
@@ -745,8 +715,7 @@ export class KingfisherGameEngine {
     if (!this.waterMaterial) return;
     const weather = this.habitat.weather;
     const clarity = this.habitat.waterClarity;
-    const waterColor = new THREE.Color().setHSL(0.515, 0.54, lerp(0.3, 0.43, clarity));
-    this.waterMaterial.color.copy(waterColor);
+    this.waterMaterial.color.copy(new THREE.Color().setHSL(0.515, 0.54, lerp(0.3, 0.43, clarity)));
     this.waterMaterial.opacity = lerp(0.56, 0.74, clarity);
     this.waterMaterial.roughness = lerp(0.08, 0.34, weather);
     this.airColor.setHSL(0.54, lerp(0.32, 0.5, 1 - weather), lerp(0.61, 0.71, 1 - weather));
@@ -776,9 +745,7 @@ export class KingfisherGameEngine {
       this.callbacks.onEvent?.({ type: "lock", message: `DIVE LOCK · ${this.currentTarget.userData.type.label}` });
       this._tone(560, 0.055, 0.018);
       this._haptic(8);
-    } else if (this.controlSettings.smartDive) {
-      this.smartDiveCommit = true;
-    }
+    } else if (this.controlSettings.smartDive) this.smartDiveCommit = true;
     this.diveAttempt = true;
     this.diveEnteredWater = false;
     this.diveCaught = false;
@@ -833,9 +800,7 @@ export class KingfisherGameEngine {
 
   _haptic(pattern = 12) {
     if (!this.controlSettings.haptics) return;
-    try {
-      navigator.vibrate?.(pattern);
-    } catch {}
+    try { navigator.vibrate?.(pattern); } catch {}
   }
 
   startHunt() {
@@ -984,51 +949,18 @@ export class KingfisherGameEngine {
     const locked = Boolean(this.lockedTarget?.visible && (this.smartDiveCommit || this.pointerDive || this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.gamepadDive));
 
     this.callbacks.onHud?.({
-      state: this.state,
-      mode: this.mode,
-      countdown: this.countdown,
-      timeRemaining: this.timeRemaining,
-      score: this.score,
-      catches: this.catches,
-      misses: this.misses,
-      collisions: this.collisions,
-      rescues: this.rescues,
-      combo: this.combo,
-      bestCombo: this.bestCombo,
-      energy: this.energy,
-      focus: this.focus,
-      focusActive: this.focusActive,
-      focusTime: this.focusTime,
-      timeBonus: this.timeBonus,
-      perfectDives: this.perfectDives,
-      rareCatches: this.rareCatches,
-      discoveredSpecies: Object.keys(this.discovered).length,
-      discovered: { ...this.discovered },
-      totalSpecies: Object.keys(FISH_TYPES).length,
-      lifetimeCatches: this.lifetimeCatches,
-      lastDiveGrade: this.lastDiveGrade,
-      air: this.air,
-      underwater,
-      depth: Math.max(0, -this.bird.position.y),
-      altitude: Math.max(0, this.bird.position.y),
-      speed: this.speed,
-      holdingFish: this.holdingFish,
-      holdingValue: this.holdingValue,
-      targetLabel: this.holdingFish
-        ? "GOLD PERCH"
-        : locked && this.lockedTarget
-          ? `LOCKED · ${this.lockedTarget.userData.type.label}`
-          : this.currentTarget?.userData?.type?.label || "SCAN THE WATER",
-      targetKind: this.holdingFish ? "perch" : this.currentTarget ? "fish" : "none",
-      targetDistance,
-      marker,
-      targetLocked: locked,
-      offCourse: Math.abs(this.bird.position.x) > RIVER_HALF_WIDTH + 1.8,
-      activeFish,
-      fishTotal: this.fish.length,
-      bestScore: this.bestScore,
-      speciesCaught: { ...this.speciesCaught },
-      habitat: { ...this.habitat },
+      state: this.state, mode: this.mode, countdown: this.countdown, timeRemaining: this.timeRemaining,
+      score: this.score, catches: this.catches, misses: this.misses, collisions: this.collisions, rescues: this.rescues,
+      combo: this.combo, bestCombo: this.bestCombo, energy: this.energy, focus: this.focus, focusActive: this.focusActive,
+      focusTime: this.focusTime, timeBonus: this.timeBonus, perfectDives: this.perfectDives, rareCatches: this.rareCatches,
+      discoveredSpecies: Object.keys(this.discovered).length, discovered: { ...this.discovered }, totalSpecies: Object.keys(FISH_TYPES).length,
+      lifetimeCatches: this.lifetimeCatches, lastDiveGrade: this.lastDiveGrade, air: this.air, underwater,
+      depth: Math.max(0, -this.bird.position.y), altitude: Math.max(0, this.bird.position.y), speed: this.speed,
+      holdingFish: this.holdingFish, holdingValue: this.holdingValue,
+      targetLabel: this.holdingFish ? "GOLD PERCH" : locked && this.lockedTarget ? `LOCKED · ${this.lockedTarget.userData.type.label}` : this.currentTarget?.userData?.type?.label || "SCAN THE WATER",
+      targetKind: this.holdingFish ? "perch" : this.currentTarget ? "fish" : "none", targetDistance, marker, targetLocked: locked,
+      offCourse: Math.abs(this.bird.position.x) > RIVER_HALF_WIDTH + 1.8, activeFish, fishTotal: this.fish.length,
+      bestScore: this.bestScore, speciesCaught: { ...this.speciesCaught }, habitat: { ...this.habitat },
     });
   }
 
@@ -1046,11 +978,7 @@ export class KingfisherGameEngine {
     this.temp.copy(position).project(this.camera);
     this.camera.getWorldDirection(this.cameraDirection);
     this.temp2.copy(position).sub(this.camera.position);
-    return {
-      x: this.temp.x,
-      y: this.temp.y,
-      behind: this.temp2.dot(this.cameraDirection) < 0,
-    };
+    return { x: this.temp.x, y: this.temp.y, behind: this.temp2.dot(this.cameraDirection) < 0 };
   }
 
   _nearestPerch() {
@@ -1111,8 +1039,8 @@ export class KingfisherGameEngine {
     if (this.keys.has("KeyW") || this.keys.has("ArrowUp")) y += 1;
     if (this.keys.has("KeyS") || this.keys.has("ArrowDown")) y -= 1;
 
-    this.gamepadDive = false;
-    this.gamepadFlap = false;
+    let nextGamepadDive = false;
+    let nextGamepadFlap = false;
     try {
       const pads = navigator.getGamepads?.() || [];
       const pad = Array.from(pads).find(Boolean);
@@ -1120,12 +1048,13 @@ export class KingfisherGameEngine {
         const dead = (value) => (Math.abs(value) < 0.1 ? 0 : value);
         x += dead(pad.axes?.[0] || 0);
         y += -dead(pad.axes?.[1] || 0);
-        this.gamepadFlap = Boolean(pad.buttons?.[0]?.pressed);
-        const wasGamepadDive = this.gamepadDive;
-        this.gamepadDive = Boolean(pad.buttons?.[1]?.pressed || pad.buttons?.[7]?.pressed);
-        if (this.gamepadDive && !wasGamepadDive) this._beginDive();
+        nextGamepadFlap = Boolean(pad.buttons?.[0]?.pressed);
+        nextGamepadDive = Boolean(pad.buttons?.[1]?.pressed || pad.buttons?.[7]?.pressed);
       }
     } catch {}
+    if (nextGamepadDive && !this.gamepadDive) this._beginDive();
+    this.gamepadDive = nextGamepadDive;
+    this.gamepadFlap = nextGamepadFlap;
 
     if (this.controlSettings.invertY) y *= -1;
     return {
@@ -1136,8 +1065,7 @@ export class KingfisherGameEngine {
     };
   }
 
-  _updateFlight(dt, elapsed) {
-    const input = this._readInput();
+  _updateFlight(dt, elapsed, input) {
     const underwater = this.bird.position.y < WATER_Y - 0.06;
     this.previousBirdPosition.copy(this.bird.position);
 
@@ -1148,8 +1076,7 @@ export class KingfisherGameEngine {
     const sensitivity = this.controlSettings.sensitivity;
     const yawRate = underwater ? 1.0 : lerp(1.05, 1.48, clamp(this.speed / AIR_DIVE, 0, 1));
     this.yaw -= input.x * yawRate * sensitivity * dt;
-    const targetBank = -input.x * MAX_BANK * clamp(this.speed / 14, 0.55, 1);
-    this.bank = lerp(this.bank, targetBank, smooth(5.5, dt));
+    this.bank = lerp(this.bank, -input.x * MAX_BANK * clamp(this.speed / 14, 0.55, 1), smooth(5.5, dt));
 
     let targetPitch = input.y * (underwater ? 0.52 : 0.46) * sensitivity;
     const locked = input.dive && !this.holdingFish && this.lockedTarget?.visible;
@@ -1167,28 +1094,15 @@ export class KingfisherGameEngine {
       const desiredYaw = Math.atan2(diveAim.x, -diveAim.z);
       const yawDelta = Math.atan2(Math.sin(desiredYaw - this.yaw), Math.cos(desiredYaw - this.yaw));
       this.yaw += yawDelta * smooth(3.2 + this.controlSettings.assist * 5.5, dt);
-      const desiredPitch = Math.asin(clamp(diveAim.y, -0.995, 0.9));
-      targetPitch = clamp(desiredPitch, -1.48, -0.58);
-      const correction = clamp(this.controlSettings.assist, 0, 0.9);
-      targetPitch = lerp(targetPitch, targetPitch + input.y * 0.18, 1 - correction * 0.45);
+      targetPitch = clamp(Math.asin(clamp(diveAim.y, -0.995, 0.9)), -1.48, -0.58);
+      targetPitch = lerp(targetPitch, targetPitch + input.y * 0.18, 1 - clamp(this.controlSettings.assist, 0, 0.9) * 0.45);
       this.targetLockAge += dt;
-    } else if (input.dive && !this.holdingFish) {
-      targetPitch = Math.min(targetPitch, -1.05);
-    } else if (input.flap) {
-      targetPitch = Math.max(targetPitch, underwater ? 0.7 : 0.38);
-    } else if (!underwater) {
-      const autoLevel = this.bird.position.y < 2.3 ? 0.14 : -0.015;
-      targetPitch = lerp(targetPitch, autoLevel, 0.38);
-    }
+    } else if (input.dive && !this.holdingFish) targetPitch = Math.min(targetPitch, -1.05);
+    else if (input.flap) targetPitch = Math.max(targetPitch, underwater ? 0.7 : 0.38);
+    else if (!underwater) targetPitch = lerp(targetPitch, this.bird.position.y < 2.3 ? 0.14 : -0.015, 0.38);
 
-    const pitchRate = locked ? 7.0 : underwater ? 4.3 : 5.5;
-    this.pitch = lerp(this.pitch, clamp(targetPitch, -1.5, 0.78), smooth(pitchRate, dt));
-
-    this.forward.set(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
-      Math.sin(this.pitch),
-      -Math.cos(this.yaw) * Math.cos(this.pitch),
-    ).normalize();
+    this.pitch = lerp(this.pitch, clamp(targetPitch, -1.5, 0.78), smooth(locked ? 7.0 : underwater ? 4.3 : 5.5, dt));
+    this.forward.set(Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), -Math.cos(this.yaw) * Math.cos(this.pitch)).normalize();
 
     const wingPower = this.habitat.wingPower;
     let targetSpeed = underwater ? UNDERWATER_CRUISE * wingPower : AIR_CRUISE * wingPower;
@@ -1199,24 +1113,18 @@ export class KingfisherGameEngine {
     if (input.flap && this.energy > 0.025) {
       targetSpeed += underwater ? 5.8 : 6.8;
       this.energy = Math.max(0, this.energy - dt * (underwater ? 0.24 : 0.16));
-    } else {
-      this.energy = Math.min(1, this.energy + dt * (underwater ? 0.04 : 0.095));
-    }
+    } else this.energy = Math.min(1, this.energy + dt * (underwater ? 0.04 : 0.095));
     if (this.focusActive) targetSpeed *= 1.09;
 
-    const speedResponse = input.dive ? 3.4 : input.flap ? 5.8 : underwater ? 2.6 : 2.2;
-    this.speed = lerp(this.speed, targetSpeed, smooth(speedResponse, dt));
+    this.speed = lerp(this.speed, targetSpeed, smooth(input.dive ? 3.4 : input.flap ? 5.8 : underwater ? 2.6 : 2.2, dt));
     this.speed = clamp(this.speed, 4.2, AIR_DIVE * wingPower * 1.1);
 
     const desiredVelocity = this.temp.copy(this.forward).multiplyScalar(this.speed);
     if (!underwater) {
-      const crosswind = Math.sin(elapsed * 0.52 + this.bird.position.z * 0.013) * this.habitat.wind * 0.95;
-      const gust = Math.sin(elapsed * 2.2 + this.bird.position.z * 0.02) * this.habitat.wind * this.habitat.weather * 0.38;
-      desiredVelocity.x += crosswind + gust;
+      desiredVelocity.x += Math.sin(elapsed * 0.52 + this.bird.position.z * 0.013) * this.habitat.wind * 0.95;
+      desiredVelocity.x += Math.sin(elapsed * 2.2 + this.bird.position.z * 0.02) * this.habitat.wind * this.habitat.weather * 0.38;
       if (!input.dive && !input.flap) desiredVelocity.y -= 0.36;
-    } else {
-      desiredVelocity.multiplyScalar(0.92);
-    }
+    } else desiredVelocity.multiplyScalar(0.92);
 
     this.velocity.lerp(desiredVelocity, smooth(underwater ? 5.2 : 4.8, dt));
     this.bird.position.addScaledVector(this.velocity, dt);
@@ -1224,7 +1132,7 @@ export class KingfisherGameEngine {
     this.bird.position.z = this._wrapZ(this.bird.position.z);
 
     this._checkBoundaries();
-    this._handleWaterTransition(input, elapsed);
+    this._handleWaterTransition(input, dt);
     this._updateFocus(dt);
     this._updateBirdRotation();
   }
@@ -1245,7 +1153,7 @@ export class KingfisherGameEngine {
     }
   }
 
-  _handleWaterTransition(input, elapsed) {
+  _handleWaterTransition(input, dt) {
     const underwater = this.bird.position.y < WATER_Y - 0.06;
     if (underwater && !this.wasUnderwater) {
       this.diveEnteredWater = true;
@@ -1274,13 +1182,11 @@ export class KingfisherGameEngine {
     this.wasUnderwater = underwater;
 
     if (underwater) {
-      this.air = Math.max(0, this.air - 0.095 * this.clock.getDelta?.() || this.air);
+      this.air = Math.max(0, this.air - dt * 0.095);
       this.bubbleAccumulator += 1;
       if ((input.flap || input.dive) && this.bubbleAccumulator % 5 === 0) this._spawnBubble(this.bird.position);
       if (this.air <= 0) this.rescue("OUT OF AIR · RETURNED TO PERCH", 180);
-    } else {
-      this.air = Math.min(1, this.air + 0.035);
-    }
+    } else this.air = Math.min(1, this.air + dt * 0.48);
   }
 
   _updateFocus(dt) {
@@ -1318,11 +1224,7 @@ export class KingfisherGameEngine {
         fleeZ = flee.z * response;
       }
       fish.position.z += (fish.userData.speed * this.habitat.riverCurrent + fleeZ) * dt;
-      fish.position.x = clamp(
-        fish.userData.baseX + Math.sin(elapsed * 1.25 * fish.userData.wiggle + phase + schoolPhase) * 1.0 + Math.sin(elapsed * 0.38 + schoolPhase) * 0.55 + fleeX,
-        -RIVER_HALF_WIDTH + 0.6,
-        RIVER_HALF_WIDTH - 0.6,
-      );
+      fish.position.x = clamp(fish.userData.baseX + Math.sin(elapsed * 1.25 * fish.userData.wiggle + phase + schoolPhase) * 1.0 + Math.sin(elapsed * 0.38 + schoolPhase) * 0.55 + fleeX, -RIVER_HALF_WIDTH + 0.6, RIVER_HALF_WIDTH - 0.6);
       fish.position.y = fish.userData.baseY + Math.sin(elapsed * 1.55 + phase) * 0.09;
       fish.position.z = this._wrapZ(fish.position.z);
       fish.rotation.y = Math.PI + Math.sin(elapsed * 0.48 + phase) * 0.12;
@@ -1333,20 +1235,14 @@ export class KingfisherGameEngine {
     if (this.currentTarget?.visible) {
       this.targetRing.visible = true;
       this.targetRing.position.copy(this.currentTarget.position);
-      const pulse = 1 + Math.sin(elapsed * 5.4) * 0.08;
-      this.targetRing.scale.setScalar(pulse * (this.currentTarget.userData.type.scale || 1));
-    } else {
-      this.targetRing.visible = false;
-    }
+      this.targetRing.scale.setScalar((1 + Math.sin(elapsed * 5.4) * 0.08) * (this.currentTarget.userData.type.scale || 1));
+    } else this.targetRing.visible = false;
 
     if (this.lockedTarget?.visible) {
       this.lockRing.visible = true;
       this.lockRing.position.copy(this.lockedTarget.position);
-      const pulse = 1.08 + Math.sin(elapsed * 8.2) * 0.12;
-      this.lockRing.scale.setScalar(pulse * (this.lockedTarget.userData.type.scale || 1));
-    } else {
-      this.lockRing.visible = false;
-    }
+      this.lockRing.scale.setScalar((1.08 + Math.sin(elapsed * 8.2) * 0.12) * (this.lockedTarget.userData.type.scale || 1));
+    } else this.lockRing.visible = false;
   }
 
   _checkCatchAndBank(elapsed) {
@@ -1355,18 +1251,16 @@ export class KingfisherGameEngine {
       let caught = null;
       let caughtDistance = Infinity;
       const assist = clamp(this.controlSettings.assist, 0, 0.9);
-
       const candidates = target ? [target, ...this.fish.filter((fish) => fish !== target && fish.visible)] : this.fish;
       for (const fish of candidates) {
         if (!fish.visible || fish.userData.caught) continue;
         const scale = fish.userData.type.scale || 1;
-        const isTarget = fish === target;
-        const catchRadius = (isTarget ? lerp(1.35, 2.15, assist) : 1.05) * scale;
+        const catchRadius = (fish === target ? lerp(1.35, 2.15, assist) : 1.05) * scale;
         const distance = pointSegmentDistance(fish.position, this.previousBirdPosition, this.bird.position, this.scratch);
         if (distance < catchRadius && distance < caughtDistance) {
           caught = fish;
           caughtDistance = distance;
-          if (isTarget) break;
+          if (fish === target) break;
         }
       }
       if (caught && elapsed - this.lastCatchAt > 0.25) this._catchFish(caught, caughtDistance, elapsed);
@@ -1392,7 +1286,6 @@ export class KingfisherGameEngine {
 
     this.lastDiveGrade = perfect ? "PERFECT" : clean ? "CLEAN" : "SOLID";
     if (perfect) this.perfectDives += 1;
-
     const gross = Math.round(type.value * multiplier);
     const immediate = Math.max(120, Math.round(gross * 0.43));
     this.score += immediate;
@@ -1408,10 +1301,7 @@ export class KingfisherGameEngine {
     this.smartDiveCommit = false;
     this.focus = Math.min(1, this.focus + (perfect ? 0.46 : 0.25));
 
-    this.callbacks.onEvent?.({
-      type: "catch",
-      message: `${this.lastDiveGrade} CATCH · ${type.label} · +${immediate.toLocaleString("en-US")} · RETURN TO GOLD PERCH`,
-    });
+    this.callbacks.onEvent?.({ type: "catch", message: `${this.lastDiveGrade} CATCH · ${type.label} · +${immediate.toLocaleString("en-US")} · RETURN TO GOLD PERCH` });
     this._tone(perfect ? 920 : clean ? 710 : 610, 0.13, 0.038);
     this._haptic(perfect ? [16, 18, 32] : [18, 18, 22]);
     this._impactCamera(perfect ? 0.22 : 0.12);
@@ -1421,7 +1311,6 @@ export class KingfisherGameEngine {
   _bankFish() {
     const type = this.holdingType;
     if (!type) return;
-
     this.catches += 1;
     this.combo += 1;
     this.bestCombo = Math.max(this.bestCombo, this.combo);
@@ -1434,15 +1323,7 @@ export class KingfisherGameEngine {
     this.discovered[type.id] = (this.discovered[type.id] || 0) + 1;
     if (type.rarity >= 3 || type.legendary) this.rareCatches += 1;
 
-    const earnedTime = this.mode === "hunt"
-      ? this.lastDiveGrade === "PERFECT"
-        ? 2.8
-        : type.legendary
-          ? 4.5
-          : type.rarity >= 3
-            ? 1.7
-            : 0.7
-      : 0;
+    const earnedTime = this.mode === "hunt" ? (this.lastDiveGrade === "PERFECT" ? 2.8 : type.legendary ? 4.5 : type.rarity >= 3 ? 1.7 : 0.7) : 0;
     if (earnedTime > 0) {
       this.timeRemaining += earnedTime;
       this.timeBonus += earnedTime;
@@ -1451,17 +1332,12 @@ export class KingfisherGameEngine {
     safeWriteJSON("aspen-kingfisher-lifetime-v2", this.lifetimeCatches);
     safeWriteJSON("aspen-kingfisher-discovered-v2", this.discovered);
     safeWriteJSON("aspen-kingfisher-species-v2", this.speciesCaught);
-
-    this.callbacks.onEvent?.({
-      type: "bank",
-      message: `${type.label} BANKED · +${bankValue.toLocaleString("en-US")}${earnedTime ? ` · +${earnedTime.toFixed(1)}s` : ""} · STREAK ×${this.combo}`,
-    });
+    this.callbacks.onEvent?.({ type: "bank", message: `${type.label} BANKED · +${bankValue.toLocaleString("en-US")}${earnedTime ? ` · +${earnedTime.toFixed(1)}s` : ""} · STREAK ×${this.combo}` });
     this._tone(type.legendary ? 1040 : 790, 0.16, 0.04);
     this._haptic(type.legendary ? [24, 30, 24, 30, 42] : [16, 20, 30]);
 
     const caughtFish = this.fish.find((fish) => fish.userData.caught && fish.userData.type.id === type.id);
     if (caughtFish) this._placeFish(caughtFish, false);
-
     this.holdingFish = null;
     this.holdingValue = 0;
     this.holdingType = null;
@@ -1473,8 +1349,7 @@ export class KingfisherGameEngine {
   }
 
   _impactCamera(amount) {
-    if (this.controlSettings.reducedMotion) return;
-    this.cameraShake = Math.max(this.cameraShake, amount);
+    if (!this.controlSettings.reducedMotion) this.cameraShake = Math.max(this.cameraShake, amount);
   }
 
   _updateCamera(dt) {
@@ -1482,7 +1357,6 @@ export class KingfisherGameEngine {
     const underwater = this.bird.position.y < WATER_Y - 0.08;
     const diveActive = (this.pointerDive || this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.gamepadDive || this.smartDiveCommit) && !this.holdingFish;
     const lockTarget = this.lockedTarget?.visible ? this.lockedTarget : null;
-
     const baseDistance = (underwater ? 6.5 : diveActive ? 7.0 : 8.2) * this.controlSettings.cameraDistance;
     const height = underwater ? 1.7 : diveActive ? 2.35 : 3.15;
     const sideOffset = this.bank * 1.15;
@@ -1491,27 +1365,21 @@ export class KingfisherGameEngine {
     desired.y += height;
     desired.x += Math.cos(this.yaw) * sideOffset;
     desired.z += Math.sin(this.yaw) * sideOffset;
-
     if (this.cameraShake > 0.001 && !this.controlSettings.reducedMotion) {
       desired.x += rand(-1, 1) * this.cameraShake;
       desired.y += rand(-1, 1) * this.cameraShake * 0.55;
       desired.z += rand(-1, 1) * this.cameraShake * 0.45;
       this.cameraShake *= Math.exp(-8.5 * dt);
     }
-
     this.camera.position.lerp(desired, smooth(diveActive ? 7.2 : underwater ? 6.2 : 5.4, dt));
 
     this.cameraLookTarget.copy(this.bird.position).addScaledVector(this.forward, underwater ? 7 : 9);
     this.cameraLookTarget.y += underwater ? 0.1 : 0.35;
-    if (lockTarget) {
-      const towardTarget = this.temp2.copy(lockTarget.position);
-      this.cameraLookTarget.lerp(towardTarget, diveActive ? 0.48 : 0.22);
-    }
+    if (lockTarget) this.cameraLookTarget.lerp(this.temp2.copy(lockTarget.position), diveActive ? 0.48 : 0.22);
     this.cameraLook.lerp(this.cameraLookTarget, smooth(diveActive ? 8.0 : 5.6, dt));
     this.camera.lookAt(this.cameraLook);
 
-    const targetFov = underwater ? 72 : diveActive ? lerp(67, 76, clamp(this.speed / AIR_DIVE, 0, 1)) : 64;
-    this.camera.fov = lerp(this.camera.fov, targetFov, smooth(4.8, dt));
+    this.camera.fov = lerp(this.camera.fov, underwater ? 72 : diveActive ? lerp(67, 76, clamp(this.speed / AIR_DIVE, 0, 1)) : 64, smooth(4.8, dt));
     this.camera.updateProjectionMatrix();
   }
 
@@ -1527,7 +1395,6 @@ export class KingfisherGameEngine {
       position.setZ(i, wave * roughness);
     }
     position.needsUpdate = true;
-    this.water.geometry.computeVertexNormals();
   }
 
   _updateEnvironmentByDepth() {
@@ -1537,17 +1404,14 @@ export class KingfisherGameEngine {
     background.copy(this.airColor).lerp(this.underwaterColor, depthBlend);
     this.scene.background.copy(background);
     this.scene.fog.color.copy(background);
-    this.scene.fog.density = underwater
-      ? lerp(0.022, 0.07, depthBlend) * lerp(1.25, 0.8, this.habitat.waterClarity)
-      : 0.0064 + this.habitat.weather * 0.0035;
+    this.scene.fog.density = underwater ? lerp(0.022, 0.07, depthBlend) * lerp(1.25, 0.8, this.habitat.waterClarity) : 0.0064 + this.habitat.weather * 0.0035;
     if (this.renderer) this.renderer.toneMappingExposure = underwater ? 0.92 : lerp(0.96, 1.1, 1 - this.habitat.weather);
   }
 
   _spawnSplash(position, strength, surfacing) {
     const count = clamp(Math.round(10 + strength * 0.65), 12, 28);
-    const material = new THREE.MeshBasicMaterial({ color: 0xd9fbff, transparent: true, opacity: 0.8, depthWrite: false });
     for (let i = 0; i < count; i += 1) {
-      const droplet = new THREE.Mesh(new THREE.SphereGeometry(rand(0.025, 0.075), 6, 4), material.clone());
+      const droplet = new THREE.Mesh(new THREE.SphereGeometry(rand(0.025, 0.075), 6, 4), new THREE.MeshBasicMaterial({ color: 0xd9fbff, transparent: true, opacity: 0.8, depthWrite: false }));
       droplet.position.set(position.x + rand(-0.28, 0.28), WATER_Y + 0.03, position.z + rand(-0.28, 0.28));
       const radial = rand(0.7, 2.8) + strength * 0.035;
       const angle = Math.random() * Math.PI * 2;
@@ -1559,10 +1423,7 @@ export class KingfisherGameEngine {
       this.effectParticles.push(droplet);
     }
 
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.24, 0.32, 28),
-      new THREE.MeshBasicMaterial({ color: 0xd7f9ff, transparent: true, opacity: 0.64, side: THREE.DoubleSide, depthWrite: false }),
-    );
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.32, 28), new THREE.MeshBasicMaterial({ color: 0xd7f9ff, transparent: true, opacity: 0.64, side: THREE.DoubleSide, depthWrite: false }));
     ring.rotation.x = -Math.PI / 2;
     ring.position.set(position.x, WATER_Y + 0.025, position.z);
     ring.userData.life = 0.75;
@@ -1574,10 +1435,7 @@ export class KingfisherGameEngine {
 
   _spawnBubble(position) {
     if (this.effectParticles.length > 90) return;
-    const bubble = new THREE.Mesh(
-      new THREE.SphereGeometry(rand(0.025, 0.075), 7, 5),
-      new THREE.MeshBasicMaterial({ color: 0xcffaff, transparent: true, opacity: 0.44, depthWrite: false }),
-    );
+    const bubble = new THREE.Mesh(new THREE.SphereGeometry(rand(0.025, 0.075), 7, 5), new THREE.MeshBasicMaterial({ color: 0xcffaff, transparent: true, opacity: 0.44, depthWrite: false }));
     bubble.position.set(position.x + rand(-0.45, 0.45), position.y + rand(-0.22, 0.18), position.z + rand(-0.5, 0.5));
     bubble.userData.velocity = new THREE.Vector3(rand(-0.18, 0.18), rand(0.55, 1.05), rand(-0.18, 0.18));
     bubble.userData.life = rand(0.7, 1.35);
@@ -1615,10 +1473,9 @@ export class KingfisherGameEngine {
   _animateBird(elapsed, input) {
     if (!this.bird?.userData.leftWing) return;
     const underwater = this.bird.position.y < WATER_Y - 0.08;
-    const flapActive = input.flap;
-    const frequency = underwater ? 10 : flapActive ? 22 : this.speed > 17 ? 5.5 : 8.5;
+    const frequency = underwater ? 10 : input.flap ? 22 : this.speed > 17 ? 5.5 : 8.5;
     const phase = Math.sin(elapsed * frequency);
-    const amplitude = underwater ? 0.38 : flapActive ? 0.92 : this.speed > 17 ? 0.18 : 0.36;
+    const amplitude = underwater ? 0.38 : input.flap ? 0.92 : this.speed > 17 ? 0.18 : 0.36;
     const diveFold = input.dive && !this.holdingFish ? 0.74 : 0;
     this.bird.userData.leftWing.rotation.z = lerp(0.18 + phase * amplitude, 1.02, diveFold);
     this.bird.userData.rightWing.rotation.z = lerp(-0.18 - phase * amplitude, -1.02, diveFold);
@@ -1638,53 +1495,24 @@ export class KingfisherGameEngine {
     this.state = "finished";
     this._clearTransientInput();
     this._cancelCommittedDive(true);
-
     const precision = this.catches + this.misses > 0 ? this.catches / (this.catches + this.misses) : 0;
     let stars = 0;
     let medal = "RIVER APPRENTICE";
-    if (this.score >= MEDAL_TARGETS.bronze) {
-      stars = 1;
-      medal = "BRONZE KINGFISHER";
-    }
-    if (this.score >= MEDAL_TARGETS.silver) {
-      stars = 2;
-      medal = "SILVER KINGFISHER";
-    }
-    if (this.score >= MEDAL_TARGETS.gold) {
-      stars = 3;
-      medal = "GOLD KINGFISHER";
-    }
-
+    if (this.score >= MEDAL_TARGETS.bronze) { stars = 1; medal = "BRONZE KINGFISHER"; }
+    if (this.score >= MEDAL_TARGETS.silver) { stars = 2; medal = "SILVER KINGFISHER"; }
+    if (this.score >= MEDAL_TARGETS.gold) { stars = 3; medal = "GOLD KINGFISHER"; }
     const newBest = this.score > this.bestScore;
     if (newBest) {
       this.bestScore = this.score;
       safeWriteJSON("aspen-kingfisher-best-v2", this.bestScore);
     }
-
-    const species = Object.entries(this.runSpecies)
-      .map(([id, count]) => ({ name: FISH_TYPES[id]?.label || id, count }))
-      .sort((a, b) => b.count - a.count);
-
+    const species = Object.entries(this.runSpecies).map(([id, count]) => ({ name: FISH_TYPES[id]?.label || id, count })).sort((a, b) => b.count - a.count);
     const result = {
-      score: this.score,
-      catches: this.catches,
-      misses: this.misses,
-      collisions: this.collisions,
-      rescues: this.rescues,
-      bestCombo: this.bestCombo,
-      perfectDives: this.perfectDives,
-      rareCatches: this.rareCatches,
-      timeBonus: this.timeBonus,
-      discoveredSpecies: Object.keys(this.discovered).length,
-      totalSpecies: Object.keys(FISH_TYPES).length,
-      bestScore: this.bestScore,
-      precision,
-      stars,
-      medal,
-      species,
-      newBest,
+      score: this.score, catches: this.catches, misses: this.misses, collisions: this.collisions, rescues: this.rescues,
+      bestCombo: this.bestCombo, perfectDives: this.perfectDives, rareCatches: this.rareCatches, timeBonus: this.timeBonus,
+      discoveredSpecies: Object.keys(this.discovered).length, totalSpecies: Object.keys(FISH_TYPES).length, bestScore: this.bestScore,
+      precision, stars, medal, species, newBest,
     };
-
     this._emitState();
     this._emitHud(true);
     this.callbacks.onFinish?.(result);
@@ -1712,7 +1540,7 @@ export class KingfisherGameEngine {
         if (this.timeRemaining <= 0) this._finishHunt();
       }
       this._chooseFishTarget();
-      this._updateFlight(dt, elapsed);
+      this._updateFlight(dt, elapsed, input);
       this._updateFish(dt, elapsed);
       this._checkCatchAndBank(elapsed);
     } else if (this.state === "menu") {
@@ -1727,9 +1555,7 @@ export class KingfisherGameEngine {
     }
 
     this._animateBird(elapsed, input);
-    for (const perch of this.perches) {
-      if (perch.userData.marker) perch.userData.marker.rotation.z = elapsed * 0.42;
-    }
+    for (const perch of this.perches) if (perch.userData.marker) perch.userData.marker.rotation.z = elapsed * 0.42;
     this._animateWater(elapsed);
     this._updateEffects(dt);
     this._updateEnvironmentByDepth();
