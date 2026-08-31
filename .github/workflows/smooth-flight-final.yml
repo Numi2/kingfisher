@@ -1,5 +1,5 @@
 name: Final Smooth Kingfisher Flight v3
-# Verification pass 4: isolate headless countdown timing from flight mechanics.
+# Verification pass 5: full Chromium engine readiness and direct controls.
 
 on:
   push:
