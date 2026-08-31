@@ -4,7 +4,7 @@ on:
   push:
     branches: [fluid-flight-v3]
     paths:
-      - "scripts/apply-fluid-flight-v3.mjs"
+      - "scripts/fluid-flight-v3-trigger"
 
 permissions:
   contents: write
