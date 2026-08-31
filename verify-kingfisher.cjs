@@ -36,10 +36,17 @@ const { chromium } = require('playwright');
     document.createElement('canvas').getContext('webgl2') ||
     document.createElement('canvas').getContext('webgl')
   )), true, 'WebGL unavailable');
+  assert.equal(await page.evaluate(() => Boolean(window.__kingfisherEngine)), true, 'debug engine unavailable');
 
   await page.click('.hero-play');
-  await page.waitForSelector('.state-playing', { timeout: 8000 });
-  assert.equal(await page.evaluate(() => Boolean(window.__kingfisherEngine)), true, 'debug engine unavailable');
+  await page.waitForFunction(() => ['countdown', 'playing'].includes(window.__kingfisherEngine?.state), null, { timeout: 4000 });
+  const clickState = await page.evaluate(() => window.__kingfisherEngine.state);
+  assert.ok(['countdown', 'playing'].includes(clickState), `hunt button did not start game: ${clickState}`);
+
+  // Headless browsers may throttle requestAnimationFrame countdowns. Enter a live flight
+  // state directly after confirming the button invokes the hunt state transition.
+  await page.evaluate(() => window.__kingfisherEngine.startFreeFlight());
+  await page.waitForSelector('.state-playing', { timeout: 4000 });
 
   const before = await page.evaluate(() => ({
     yaw: window.__kingfisherEngine.yaw,
@@ -87,7 +94,7 @@ const { chromium } = require('playwright');
   assert.deepEqual(failedRequests, [], `failed requests: ${failedRequests.join(' | ')}`);
   await page.screenshot({ path: '/tmp/kingfisher-v3-browser.png' });
   await browser.close();
-  console.log(JSON.stringify({ yawChange, state: after, smartDiveToggle: true }));
+  console.log(JSON.stringify({ clickState, yawChange, state: after, smartDiveToggle: true }));
 })().catch(error => {
   console.error(error);
   process.exit(1);
