@@ -1,4 +1,5 @@
 name: Final Smooth Kingfisher Flight v3
+# Verification pass 4: isolate headless countdown timing from flight mechanics.
 
 on:
   push:
