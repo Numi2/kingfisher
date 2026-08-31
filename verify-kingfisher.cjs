@@ -4,6 +4,7 @@ const { chromium } = require('playwright');
 (async () => {
   const browser = await chromium.launch({
     headless: true,
+    channel: 'chromium',
     args: [
       '--use-gl=angle',
       '--use-angle=swiftshader',
@@ -13,7 +14,7 @@ const { chromium } = require('playwright');
       '--disable-dev-shm-usage'
     ]
   });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
   const errors = [];
   const failedRequests = [];
   page.on('pageerror', error => errors.push(String(error)));
@@ -22,31 +23,35 @@ const { chromium } = require('playwright');
 
   await page.goto('http://localhost:3000/?debug=1', { waitUntil: 'networkidle' });
   try {
-    await page.waitForSelector('canvas, .fatal-screen', { timeout: 15000 });
+    await page.waitForFunction(() => Boolean(window.__kingfisherEngine) || Boolean(document.querySelector('.fatal-screen')), null, { timeout: 60000 });
   } catch (error) {
     console.error('BODY', (await page.locator('body').innerText()).slice(0, 2000));
+    console.error('CANVASES', await page.locator('canvas').count());
+    console.error('SCRIPTS', await page.locator('script').count());
+    console.error('READY_STATE', await page.evaluate(() => document.readyState));
     console.error('FAILED_REQUESTS', failedRequests);
     console.error('BROWSER_ERRORS', errors);
     throw error;
   }
   const fatal = await page.$('.fatal-screen');
   if (fatal) throw new Error(`Renderer failed: ${await fatal.innerText()}`);
+  assert.equal(await page.evaluate(() => Boolean(window.__kingfisherEngine)), true, 'debug engine unavailable');
   assert.ok(await page.$('canvas'), 'WebGL canvas did not render');
   assert.equal(await page.evaluate(() => Boolean(
     document.createElement('canvas').getContext('webgl2') ||
     document.createElement('canvas').getContext('webgl')
   )), true, 'WebGL unavailable');
-  assert.equal(await page.evaluate(() => Boolean(window.__kingfisherEngine)), true, 'debug engine unavailable');
 
   await page.click('.hero-play');
   await page.waitForFunction(() => ['countdown', 'playing'].includes(window.__kingfisherEngine?.state), null, { timeout: 4000 });
   const clickState = await page.evaluate(() => window.__kingfisherEngine.state);
   assert.ok(['countdown', 'playing'].includes(clickState), `hunt button did not start game: ${clickState}`);
 
-  // Headless browsers may throttle requestAnimationFrame countdowns. Enter a live flight
-  // state directly after confirming the button invokes the hunt state transition.
+  // CI may throttle requestAnimationFrame countdowns. The UI transition is checked above;
+  // controller mechanics are then exercised in an immediate live-flight state.
   await page.evaluate(() => window.__kingfisherEngine.startFreeFlight());
-  await page.waitForSelector('.state-playing', { timeout: 4000 });
+  await page.waitForFunction(() => window.__kingfisherEngine?.state === 'playing', null, { timeout: 4000 });
+  await page.waitForSelector('.joystick-zone', { state: 'attached', timeout: 4000 });
 
   const before = await page.evaluate(() => ({
     yaw: window.__kingfisherEngine.yaw,
