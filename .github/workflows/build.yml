@@ -1,0 +1,31 @@
+name: Build Kingfisher
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "baseUrl.js"
+      - "package.json"
+      - ".npmrc"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+      - name: Build production app
+        run: npm run build
