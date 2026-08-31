@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export const KINGFISHER_VERSION = "1.2.0";
+export const KINGFISHER_VERSION = "2.0.0";
 export const HUNT_DURATION = 120;
 
 export const MEDAL_TARGETS = {
@@ -11,7 +11,7 @@ export const MEDAL_TARGETS = {
 
 export const DEFAULT_CONTROL_SETTINGS = {
   sensitivity: 1,
-  assist: 0.62,
+  assist: 0.78,
   cameraDistance: 1,
   invertY: false,
   smartDive: true,
@@ -367,6 +367,10 @@ export class KingfisherGameEngine {
     this.cameraLook = new THREE.Vector3();
     this.cameraLookTarget = new THREE.Vector3();
     this.cameraShake = 0;
+    this.recoveryTimer = 0;
+    this.bankBoostTimer = 0;
+    this.slowMotionTimer = 0;
+    this.hitStopTimer = 0;
 
     this.temp = new THREE.Vector3();
     this.temp2 = new THREE.Vector3();
@@ -909,6 +913,10 @@ export class KingfisherGameEngine {
     this.diveAttempt = false;
     this.diveEnteredWater = false;
     this.diveCaught = false;
+    this.recoveryTimer = 0;
+    this.bankBoostTimer = 0;
+    this.slowMotionTimer = 0;
+    this.hitStopTimer = 0;
     this._resetBird();
     this.fish.forEach((fish, index) => this._placeFish(fish, true, index));
   }
@@ -1068,65 +1076,107 @@ export class KingfisherGameEngine {
   _updateFlight(dt, elapsed, input) {
     const underwater = this.bird.position.y < WATER_Y - 0.06;
     this.previousBirdPosition.copy(this.bird.position);
+    this.recoveryTimer = Math.max(0, this.recoveryTimer - dt);
+    this.bankBoostTimer = Math.max(0, this.bankBoostTimer - dt);
+    const recovering = this.recoveryTimer > 0;
+    const bankBoost = this.bankBoostTimer > 0;
 
     if (input.flap && this.smartDiveCommit) this._cancelCommittedDive(true);
     if (input.dive && !this.holdingFish && !this.lockedTarget?.visible) this._chooseFishTarget(true);
     if (input.dive && this.currentTarget?.visible && !this.lockedTarget) this.lockedTarget = this.currentTarget;
 
     const sensitivity = this.controlSettings.sensitivity;
-    const yawRate = underwater ? 1.0 : lerp(1.05, 1.48, clamp(this.speed / AIR_DIVE, 0, 1));
-    this.yaw += input.x * yawRate * sensitivity * dt;
-    this.bank = lerp(this.bank, -input.x * MAX_BANK * clamp(this.speed / 14, 0.55, 1), smooth(5.5, dt));
+    const yawRate = underwater ? 1.12 : lerp(1.12, 1.58, clamp(this.speed / AIR_DIVE, 0, 1));
+    let steerX = input.x;
+    let steerY = input.y;
 
-    let targetPitch = input.y * (underwater ? 0.52 : 0.46) * sensitivity;
+    if (recovering && this.holdingFish) {
+      const perch = this._nearestPerch();
+      const toPerch = this.temp3.copy(perch.position).sub(this.bird.position);
+      const desiredYaw = Math.atan2(toPerch.x, -toPerch.z);
+      const yawDelta = Math.atan2(Math.sin(desiredYaw - this.yaw), Math.cos(desiredYaw - this.yaw));
+      this.yaw += yawDelta * smooth(underwater ? 2.6 : 1.75, dt);
+      steerX *= 0.42;
+      steerY *= 0.5;
+    }
+
+    this.yaw += steerX * yawRate * sensitivity * dt;
+    const bankTarget = -steerX * MAX_BANK * clamp(this.speed / 14, 0.52, 1);
+    this.bank = lerp(this.bank, bankTarget, smooth(recovering ? 7.2 : 5.9, dt));
+
+    let targetPitch = steerY * (underwater ? 0.58 : 0.5) * sensitivity;
     const locked = input.dive && !this.holdingFish && this.lockedTarget?.visible;
 
-    if (locked) {
+    if (recovering) {
+      targetPitch = underwater ? 0.78 : 0.42;
+      targetPitch += steerY * 0.14;
+    } else if (locked) {
       const target = this.lockedTarget;
       const predicted = this.temp3.copy(target.position);
-      predicted.z += target.userData.speed * this.habitat.riverCurrent * 0.35;
+      const rawDistance = predicted.distanceTo(this.bird.position);
+      const leadTime = clamp(rawDistance / 24, 0.18, 0.72);
+      predicted.z += target.userData.speed * this.habitat.riverCurrent * leadTime;
       const toTarget = this.temp2.copy(predicted).sub(this.bird.position);
       const horizontal = Math.hypot(toTarget.x, toTarget.z);
-      const downward = Math.max(this.bird.position.y - predicted.y, horizontal * lerp(1.2, 2.4, this.controlSettings.assist));
+      const assist = clamp(this.controlSettings.assist, 0, 0.92);
+      const verticalBias = Math.max(Math.abs(toTarget.y), horizontal * lerp(1.25, 3.05, assist), 2.6);
       const diveAim = this.temp.copy(toTarget);
-      diveAim.y = -Math.max(2.0, downward);
+      diveAim.y = -verticalBias;
       diveAim.normalize();
       const desiredYaw = Math.atan2(diveAim.x, -diveAim.z);
       const yawDelta = Math.atan2(Math.sin(desiredYaw - this.yaw), Math.cos(desiredYaw - this.yaw));
-      this.yaw += yawDelta * smooth(3.2 + this.controlSettings.assist * 5.5, dt);
-      targetPitch = clamp(Math.asin(clamp(diveAim.y, -0.995, 0.9)), -1.48, -0.58);
-      targetPitch = lerp(targetPitch, targetPitch + input.y * 0.18, 1 - clamp(this.controlSettings.assist, 0, 0.9) * 0.45);
+      this.yaw += yawDelta * smooth(3.8 + assist * 6.8, dt);
+      targetPitch = clamp(Math.asin(clamp(diveAim.y, -0.999, 0.9)), -1.53, -0.62);
+      targetPitch += steerY * lerp(0.2, 0.08, assist);
       this.targetLockAge += dt;
-    } else if (input.dive && !this.holdingFish) targetPitch = Math.min(targetPitch, -1.05);
-    else if (input.flap) targetPitch = Math.max(targetPitch, underwater ? 0.7 : 0.38);
-    else if (!underwater) targetPitch = lerp(targetPitch, this.bird.position.y < 2.3 ? 0.14 : -0.015, 0.38);
+    } else if (input.dive && !this.holdingFish) {
+      targetPitch = Math.min(targetPitch, -1.18);
+    } else if (input.flap) {
+      targetPitch = Math.max(targetPitch, underwater ? 0.76 : 0.42);
+    } else if (this.holdingFish) {
+      targetPitch = Math.max(targetPitch, underwater ? 0.38 : 0.12);
+    } else if (!underwater) {
+      targetPitch = lerp(targetPitch, this.bird.position.y < 2.5 ? 0.16 : -0.012, 0.42);
+    }
 
-    this.pitch = lerp(this.pitch, clamp(targetPitch, -1.5, 0.78), smooth(locked ? 7.0 : underwater ? 4.3 : 5.5, dt));
-    this.forward.set(Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), -Math.cos(this.yaw) * Math.cos(this.pitch)).normalize();
+    this.pitch = lerp(this.pitch, clamp(targetPitch, -1.54, 0.82), smooth(locked ? 8.4 : recovering ? 8.2 : underwater ? 4.8 : 5.9, dt));
+    this.forward.set(
+      Math.sin(this.yaw) * Math.cos(this.pitch),
+      Math.sin(this.pitch),
+      -Math.cos(this.yaw) * Math.cos(this.pitch),
+    ).normalize();
 
     const wingPower = this.habitat.wingPower;
     let targetSpeed = underwater ? UNDERWATER_CRUISE * wingPower : AIR_CRUISE * wingPower;
     if (input.dive && !this.holdingFish) {
-      const diveFactor = clamp((-this.pitch - 0.2) / 1.25, 0, 1);
-      targetSpeed = lerp(targetSpeed, AIR_DIVE * wingPower, 0.52 + diveFactor * 0.48);
+      const diveFactor = clamp((-this.pitch - 0.18) / 1.3, 0, 1);
+      targetSpeed = lerp(targetSpeed, AIR_DIVE * wingPower, 0.58 + diveFactor * 0.42);
     }
-    if (input.flap && this.energy > 0.025) {
-      targetSpeed += underwater ? 5.8 : 6.8;
-      this.energy = Math.max(0, this.energy - dt * (underwater ? 0.24 : 0.16));
-    } else this.energy = Math.min(1, this.energy + dt * (underwater ? 0.04 : 0.095));
-    if (this.focusActive) targetSpeed *= 1.09;
+    if (input.flap && this.energy > 0.02) {
+      targetSpeed += underwater ? 6.4 : 7.6;
+      this.energy = Math.max(0, this.energy - dt * (underwater ? 0.2 : 0.135));
+    } else {
+      this.energy = Math.min(1, this.energy + dt * (underwater ? 0.055 : 0.12));
+    }
+    if (recovering) targetSpeed += underwater ? 6.8 : 5.2;
+    if (bankBoost) targetSpeed += 7.5 * clamp(this.bankBoostTimer / 1.8, 0.25, 1);
+    if (this.focusActive) targetSpeed *= 1.12;
 
-    this.speed = lerp(this.speed, targetSpeed, smooth(input.dive ? 3.4 : input.flap ? 5.8 : underwater ? 2.6 : 2.2, dt));
-    this.speed = clamp(this.speed, 4.2, AIR_DIVE * wingPower * 1.1);
+    this.speed = lerp(this.speed, targetSpeed, smooth(input.dive ? 4.2 : input.flap || recovering ? 6.4 : underwater ? 3.1 : 2.5, dt));
+    this.speed = clamp(this.speed, 4.2, AIR_DIVE * wingPower * 1.18);
 
     const desiredVelocity = this.temp.copy(this.forward).multiplyScalar(this.speed);
     if (!underwater) {
-      desiredVelocity.x += Math.sin(elapsed * 0.52 + this.bird.position.z * 0.013) * this.habitat.wind * 0.95;
-      desiredVelocity.x += Math.sin(elapsed * 2.2 + this.bird.position.z * 0.02) * this.habitat.wind * this.habitat.weather * 0.38;
-      if (!input.dive && !input.flap) desiredVelocity.y -= 0.36;
-    } else desiredVelocity.multiplyScalar(0.92);
+      desiredVelocity.x += Math.sin(elapsed * 0.52 + this.bird.position.z * 0.013) * this.habitat.wind * 0.82;
+      desiredVelocity.x += Math.sin(elapsed * 2.2 + this.bird.position.z * 0.02) * this.habitat.wind * this.habitat.weather * 0.3;
+      if (!input.dive && !input.flap && !recovering) desiredVelocity.y -= 0.3;
+      if (recovering) desiredVelocity.y += 1.6;
+    } else {
+      desiredVelocity.multiplyScalar(0.94);
+      if (recovering) desiredVelocity.y += 3.8;
+    }
 
-    this.velocity.lerp(desiredVelocity, smooth(underwater ? 5.2 : 4.8, dt));
+    this.velocity.lerp(desiredVelocity, smooth(underwater ? 5.8 : 5.2, dt));
     this.bird.position.addScaledVector(this.velocity, dt);
     this.bird.position.y = clamp(this.bird.position.y, RIVERBED_Y - 0.05, 30);
     this.bird.position.z = this._wrapZ(this.bird.position.z);
@@ -1136,7 +1186,6 @@ export class KingfisherGameEngine {
     this._updateFocus(dt);
     this._updateBirdRotation();
   }
-
   _checkBoundaries() {
     if (Math.abs(this.bird.position.x) > RIVER_HALF_WIDTH + 10.5) {
       this.collisions += 1;
@@ -1241,21 +1290,23 @@ export class KingfisherGameEngine {
     if (this.lockedTarget?.visible) {
       this.lockRing.visible = true;
       this.lockRing.position.copy(this.lockedTarget.position);
-      this.lockRing.scale.setScalar((1.08 + Math.sin(elapsed * 8.2) * 0.12) * (this.lockedTarget.userData.type.scale || 1));
+      const strikeReady = this.bird.position.distanceTo(this.lockedTarget.position) < 10;
+      this.lockRing.material.color.setHex(strikeReady ? 0x8ef19f : 0xffd46b);
+      this.lockRing.scale.setScalar((strikeReady ? 1.28 : 1.08 + Math.sin(elapsed * 8.2) * 0.12) * (this.lockedTarget.userData.type.scale || 1));
     } else this.lockRing.visible = false;
   }
 
   _checkCatchAndBank(elapsed) {
-    if (!this.holdingFish && this.bird.position.y < -0.1) {
+    if (!this.holdingFish && this.bird.position.y < 0.35) {
       const target = this.lockedTarget?.visible ? this.lockedTarget : this.currentTarget;
       let caught = null;
       let caughtDistance = Infinity;
-      const assist = clamp(this.controlSettings.assist, 0, 0.9);
+      const assist = clamp(this.controlSettings.assist, 0, 0.92);
       const candidates = target ? [target, ...this.fish.filter((fish) => fish !== target && fish.visible)] : this.fish;
       for (const fish of candidates) {
         if (!fish.visible || fish.userData.caught) continue;
         const scale = fish.userData.type.scale || 1;
-        const catchRadius = (fish === target ? lerp(1.35, 2.15, assist) : 1.05) * scale;
+        const catchRadius = (fish === target ? lerp(1.95, 3.35, assist) : 1.3) * scale;
         const distance = pointSegmentDistance(fish.position, this.previousBirdPosition, this.bird.position, this.scratch);
         if (distance < catchRadius && distance < caughtDistance) {
           caught = fish;
@@ -1263,59 +1314,64 @@ export class KingfisherGameEngine {
           if (fish === target) break;
         }
       }
-      if (caught && elapsed - this.lastCatchAt > 0.25) this._catchFish(caught, caughtDistance, elapsed);
+      if (caught && elapsed - this.lastCatchAt > 0.22) this._catchFish(caught, caughtDistance, elapsed);
     }
 
     if (this.holdingFish) {
       const perch = this._nearestPerch();
-      if (this.bird.position.distanceTo(perch.position) < 3.15) this._bankFish();
+      if (this.bird.position.distanceTo(perch.position) < 3.65) this._bankFish();
     }
   }
-
   _catchFish(fish, distance, elapsed) {
     const type = fish.userData.type;
     const diveDrop = Math.max(0, this.diveStartHeight - this.bird.position.y);
-    const targetRadius = lerp(1.35, 2.15, clamp(this.controlSettings.assist, 0, 0.9)) * (type.scale || 1);
+    const targetRadius = lerp(1.95, 3.35, clamp(this.controlSettings.assist, 0, 0.92)) * (type.scale || 1);
     const precision = clamp(1 - distance / Math.max(0.1, targetRadius), 0, 1);
-    const speedQuality = clamp((this.speed - 10) / 12, 0, 1);
-    const dropQuality = clamp((diveDrop - 2.5) / 6, 0, 1);
-    const quality = precision * 0.48 + speedQuality * 0.3 + dropQuality * 0.22;
-    const perfect = quality > 0.76;
-    const clean = quality > 0.47;
-    const multiplier = perfect ? 1.85 : clean ? 1.42 : 1.14;
+    const speedQuality = clamp((this.speed - 9) / 13, 0, 1);
+    const dropQuality = clamp((diveDrop - 1.8) / 6.5, 0, 1);
+    const quality = precision * 0.5 + speedQuality * 0.3 + dropQuality * 0.2;
+    const perfect = quality > 0.72;
+    const clean = quality > 0.4;
+    const multiplier = perfect ? 2.05 : clean ? 1.58 : 1.25;
 
-    this.lastDiveGrade = perfect ? "PERFECT" : clean ? "CLEAN" : "SOLID";
+    this.lastDiveGrade = perfect ? "PERFECT" : clean ? "CLEAN" : "CATCH";
     if (perfect) this.perfectDives += 1;
     const gross = Math.round(type.value * multiplier);
-    const immediate = Math.max(120, Math.round(gross * 0.43));
+    const immediate = Math.max(180, Math.round(gross * 0.66));
     this.score += immediate;
     this.holdingFish = type.label;
     this.holdingType = type;
     this.holdingValue = Math.max(0, gross - immediate);
     this.diveCaught = true;
     this.lastCatchAt = elapsed;
+    this.recoveryTimer = 1.45;
+    this.slowMotionTimer = Math.max(this.slowMotionTimer, perfect ? 0.72 : 0.48);
+    this.hitStopTimer = Math.max(this.hitStopTimer, perfect ? 0.065 : 0.04);
+    this.speed = Math.max(this.speed, perfect ? 19 : 16.5);
+    this.pitch = Math.max(this.pitch, 0.18);
+    this.energy = Math.min(1, this.energy + 0.22);
     fish.visible = false;
     fish.userData.caught = true;
     this.currentTarget = null;
     this.lockedTarget = null;
     this.smartDiveCommit = false;
-    this.focus = Math.min(1, this.focus + (perfect ? 0.46 : 0.25));
+    this.focus = Math.min(1, this.focus + (perfect ? 0.54 : 0.32));
 
-    this.callbacks.onEvent?.({ type: "catch", message: `${this.lastDiveGrade} CATCH · ${type.label} · +${immediate.toLocaleString("en-US")} · RETURN TO GOLD PERCH` });
-    this._tone(perfect ? 920 : clean ? 710 : 610, 0.13, 0.038);
-    this._haptic(perfect ? [16, 18, 32] : [18, 18, 22]);
-    this._impactCamera(perfect ? 0.22 : 0.12);
+    this._spawnCatchBurst(fish.position, type.legendary || perfect);
+    this.callbacks.onEvent?.({ type: "catch", points: immediate, grade: this.lastDiveGrade });
+    this._tone(perfect ? 980 : clean ? 760 : 640, 0.14, 0.042);
+    this._haptic(perfect ? [14, 15, 38] : [16, 15, 26]);
+    this._impactCamera(perfect ? 0.28 : 0.16);
     this._emitHud(true);
   }
-
   _bankFish() {
     const type = this.holdingType;
     if (!type) return;
     this.catches += 1;
     this.combo += 1;
     this.bestCombo = Math.max(this.bestCombo, this.combo);
-    const comboMultiplier = 1 + Math.min(1.35, Math.max(0, this.combo - 1) * 0.14);
-    const bankValue = Math.round(this.holdingValue * comboMultiplier + 110 + this.combo * 22);
+    const comboMultiplier = 1 + Math.min(1.55, Math.max(0, this.combo - 1) * 0.17);
+    const bankValue = Math.round(this.holdingValue * comboMultiplier + 180 + this.combo * 34);
     this.score += bankValue;
     this.lifetimeCatches += 1;
     this.runSpecies[type.id] = (this.runSpecies[type.id] || 0) + 1;
@@ -1323,7 +1379,11 @@ export class KingfisherGameEngine {
     this.discovered[type.id] = (this.discovered[type.id] || 0) + 1;
     if (type.rarity >= 3 || type.legendary) this.rareCatches += 1;
 
-    const earnedTime = this.mode === "hunt" ? (this.lastDiveGrade === "PERFECT" ? 2.8 : type.legendary ? 4.5 : type.rarity >= 3 ? 1.7 : 0.7) : 0;
+    this.bankBoostTimer = 1.8;
+    this.recoveryTimer = 0;
+    this.slowMotionTimer = Math.max(this.slowMotionTimer, 0.32);
+    this.speed = Math.max(this.speed, 18.5);
+    const earnedTime = this.mode === "hunt" ? (this.lastDiveGrade === "PERFECT" ? 3.4 : type.legendary ? 5 : type.rarity >= 3 ? 2.1 : 1.05) : 0;
     if (earnedTime > 0) {
       this.timeRemaining += earnedTime;
       this.timeBonus += earnedTime;
@@ -1332,9 +1392,10 @@ export class KingfisherGameEngine {
     safeWriteJSON("aspen-kingfisher-lifetime-v2", this.lifetimeCatches);
     safeWriteJSON("aspen-kingfisher-discovered-v2", this.discovered);
     safeWriteJSON("aspen-kingfisher-species-v2", this.speciesCaught);
-    this.callbacks.onEvent?.({ type: "bank", message: `${type.label} BANKED · +${bankValue.toLocaleString("en-US")}${earnedTime ? ` · +${earnedTime.toFixed(1)}s` : ""} · STREAK ×${this.combo}` });
-    this._tone(type.legendary ? 1040 : 790, 0.16, 0.04);
-    this._haptic(type.legendary ? [24, 30, 24, 30, 42] : [16, 20, 30]);
+    this._spawnCatchBurst(this._nearestPerch().position, true);
+    this.callbacks.onEvent?.({ type: "bank", points: bankValue, combo: this.combo });
+    this._tone(type.legendary ? 1100 : 840, 0.18, 0.045);
+    this._haptic(type.legendary ? [22, 26, 22, 26, 44] : [14, 18, 34]);
 
     const caughtFish = this.fish.find((fish) => fish.userData.caught && fish.userData.type.id === type.id);
     if (caughtFish) this._placeFish(caughtFish, false);
@@ -1342,12 +1403,11 @@ export class KingfisherGameEngine {
     this.holdingValue = 0;
     this.holdingType = null;
     this.lastDiveGrade = "";
-    this.energy = Math.min(1, this.energy + 0.2);
-    this.focus = Math.min(1, this.focus + 0.14);
+    this.energy = Math.min(1, this.energy + 0.28);
+    this.focus = Math.min(1, this.focus + 0.2);
     this.diveStartHeight = this.bird.position.y;
     this._emitHud(true);
   }
-
   _impactCamera(amount) {
     if (!this.controlSettings.reducedMotion) this.cameraShake = Math.max(this.cameraShake, amount);
   }
@@ -1408,6 +1468,26 @@ export class KingfisherGameEngine {
     if (this.renderer) this.renderer.toneMappingExposure = underwater ? 0.92 : lerp(0.96, 1.1, 1 - this.habitat.weather);
   }
 
+  _spawnCatchBurst(position, gold = false) {
+    const color = gold ? 0xffd86d : 0x7ef2ec;
+    const count = gold ? 34 : 24;
+    for (let i = 0; i < count; i += 1) {
+      const spark = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(rand(0.025, 0.085), 0),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.92, depthWrite: false }),
+      );
+      spark.position.copy(position).add(new THREE.Vector3(rand(-0.22, 0.22), rand(-0.14, 0.22), rand(-0.22, 0.22)));
+      const angle = Math.random() * Math.PI * 2;
+      const radial = rand(1.5, gold ? 5.2 : 4.2);
+      spark.userData.velocity = new THREE.Vector3(Math.cos(angle) * radial, rand(-0.3, 4.2), Math.sin(angle) * radial);
+      spark.userData.life = rand(0.42, 0.9);
+      spark.userData.maxLife = spark.userData.life;
+      spark.userData.kind = "spark";
+      this.scene.add(spark);
+      this.effectParticles.push(spark);
+    }
+  }
+
   _spawnSplash(position, strength, surfacing) {
     const count = clamp(Math.round(10 + strength * 0.65), 12, 28);
     for (let i = 0; i < count; i += 1) {
@@ -1457,8 +1537,13 @@ export class KingfisherGameEngine {
       } else {
         const velocity = particle.userData.velocity;
         if (particle.userData.kind === "splash") velocity.y -= 6.2 * dt;
+        if (particle.userData.kind === "spark") {
+          velocity.y -= 1.8 * dt;
+          velocity.multiplyScalar(Math.exp(-1.4 * dt));
+          particle.scale.setScalar(0.45 + lifeRatio * 1.15);
+        }
         particle.position.addScaledVector(velocity, dt);
-        particle.material.opacity = (particle.userData.kind === "bubble" ? 0.4 : 0.76) * lifeRatio;
+        particle.material.opacity = (particle.userData.kind === "bubble" ? 0.4 : particle.userData.kind === "spark" ? 0.9 : 0.76) * lifeRatio;
         if (particle.userData.kind === "bubble" && particle.position.y > WATER_Y - 0.02) particle.userData.life = 0;
       }
       if (particle.userData.life <= 0) {
@@ -1469,7 +1554,6 @@ export class KingfisherGameEngine {
       }
     }
   }
-
   _animateBird(elapsed, input) {
     if (!this.bird?.userData.leftWing) return;
     const underwater = this.bird.position.y < WATER_Y - 0.08;
@@ -1522,12 +1606,20 @@ export class KingfisherGameEngine {
   _animate = () => {
     if (this.destroyed) return;
     this.frame = requestAnimationFrame(this._animate);
-    const dt = Math.min(0.034, Math.max(0.001, this.clock.getDelta()));
+    const rawDt = Math.min(0.034, Math.max(0.001, this.clock.getDelta()));
+    let dt = rawDt;
+    if (this.hitStopTimer > 0) {
+      this.hitStopTimer = Math.max(0, this.hitStopTimer - rawDt);
+      dt = 0.00025;
+    } else if (this.slowMotionTimer > 0) {
+      this.slowMotionTimer = Math.max(0, this.slowMotionTimer - rawDt);
+      dt *= 0.52;
+    }
     const elapsed = this.clock.elapsedTime;
     const input = this._readInput();
 
     if (this.state === "countdown") {
-      this.countdown = Math.max(0, this.countdown - dt);
+      this.countdown = Math.max(0, this.countdown - rawDt);
       this._chooseFishTarget();
       if (this.countdown <= 0) {
         this.state = "playing";
@@ -1555,15 +1647,14 @@ export class KingfisherGameEngine {
     }
 
     this._animateBird(elapsed, input);
-    for (const perch of this.perches) if (perch.userData.marker) perch.userData.marker.rotation.z = elapsed * 0.42;
+    for (const perch of this.perches) if (perch.userData.marker) perch.userData.marker.rotation.z = elapsed * 0.55;
     this._animateWater(elapsed);
-    this._updateEffects(dt);
+    this._updateEffects(rawDt);
     this._updateEnvironmentByDepth();
     this._updateCamera(dt);
     this._emitHud(false);
     this.renderer.render(this.scene, this.camera);
   };
-
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;

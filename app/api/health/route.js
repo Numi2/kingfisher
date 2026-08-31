@@ -6,7 +6,7 @@ export function GET() {
   return NextResponse.json({
     ok: true,
     game: "aspen-kingfisher-living-river",
-    version: "1.2.1",
+    version: "2.0.0",
     mcp: "/mcp",
     gamePath: "/game",
   }, {

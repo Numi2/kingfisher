@@ -427,7 +427,7 @@ export default function KingfisherGame() {
           ) : null}
 
           <div className="flight-controls">
-            <VirtualJoystick disabled={gameState === "countdown"}/>
+            <VirtualJoystick disabled={gameState === "countdown"} onChange={(x, y) => engineRef.current?.setSteering(x, y)}/>
             <div className="action-controls">
               <HoldControl
                 className="dive-control"
