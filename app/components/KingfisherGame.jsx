@@ -56,9 +56,9 @@ const EMPTY_HUD = {
 };
 
 const CONTROL_PRESETS = {
-  assisted: { sensitivity: 0.88, assist: 0.84, cameraDistance: 1.04 },
-  natural: { sensitivity: 1, assist: 0.72, cameraDistance: 1 },
-  direct: { sensitivity: 1.16, assist: 0.18, cameraDistance: 0.94 },
+  assisted: { sensitivity: 0.92, assist: 0.78, cameraDistance: 1.04 },
+  natural: { sensitivity: 0.96, assist: 0.58, cameraDistance: 1 },
+  direct: { sensitivity: 1.05, assist: 0.14, cameraDistance: 0.96 },
 };
 
 function Icon({ children, className = "", viewBox = "0 0 24 24" }) {
@@ -227,7 +227,7 @@ export default function KingfisherGame() {
     let engine;
     let storedSettings = DEFAULT_CONTROL_SETTINGS;
     try {
-      const parsed = JSON.parse(window.localStorage.getItem("aspen-kingfisher-controls-v3") || window.localStorage.getItem("aspen-kingfisher-controls-v2") || "null");
+      const parsed = JSON.parse(window.localStorage.getItem("aspen-kingfisher-controls-v4") || "null");
       if (parsed && typeof parsed === "object") storedSettings = { ...DEFAULT_CONTROL_SETTINGS, ...parsed };
     } catch {}
     setSettings(storedSettings);
@@ -254,6 +254,7 @@ export default function KingfisherGame() {
       }, DEFAULT_HABITAT);
       engine.setControlSettings(storedSettings);
       engineRef.current = engine;
+      if (new URLSearchParams(window.location.search).has("debug")) window.__kingfisherEngine = engine;
     } catch (error) {
       setRendererError(error?.message || String(error));
       return undefined;
@@ -263,7 +264,7 @@ export default function KingfisherGame() {
     if (window.self !== window.top) {
       import("@modelcontextprotocol/ext-apps")
         .then(async ({ App }) => {
-          app = new App({ name: "aspen-kingfisher-river-hunt", version: "2.0.0" }, {}, { autoResize: true });
+          app = new App({ name: "aspen-kingfisher-river-hunt", version: "3.0.0" }, {}, { autoResize: true });
           const applyLaunch = (args = {}) => {
             const nextHabitat = {
               ...engine.habitat,
@@ -306,12 +307,13 @@ export default function KingfisherGame() {
       app?.close?.();
       engine.destroy();
       engineRef.current = null;
+      try { delete window.__kingfisherEngine; } catch {}
     };
   }, []);
 
   useEffect(() => {
     engineRef.current?.setControlSettings(settings);
-    try { window.localStorage.setItem("aspen-kingfisher-controls-v3", JSON.stringify(settings)); } catch {}
+    try { window.localStorage.setItem("aspen-kingfisher-controls-v4", JSON.stringify(settings)); } catch {}
   }, [settings]);
 
   const startHunt = () => {

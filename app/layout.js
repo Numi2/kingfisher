@@ -1,5 +1,4 @@
 import "./globals.css";
-import { baseURL } from "../baseUrl";
 
 export const metadata = {
   title: "Aspen Kingfisher — River Hunt: Living River",
@@ -25,7 +24,6 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <base href={`${baseURL}/`} />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
       </head>
