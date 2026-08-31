@@ -1,0 +1,1021 @@
+name: Build Smooth Kingfisher Flight v3
+
+on:
+  push:
+    branches: [smooth-flight-v3]
+    paths:
+      - ".github/workflows/smooth-flight-v3.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  overhaul:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out smooth-flight branch
+        uses: actions/checkout@v4
+        with:
+          ref: smooth-flight-v3
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Replace clunky controller and optimize mobile rendering
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+
+          engine_path = Path('app/lib/KingfisherGameEngine.js')
+          text = engine_path.read_text()
+
+          def replace_block(source, start_token, end_token, replacement):
+              start = source.find(start_token)
+              if start < 0:
+                  raise SystemExit(f'missing start token: {start_token}')
+              end = source.find(end_token, start)
+              if end < 0:
+                  raise SystemExit(f'missing end token after {start_token}: {end_token}')
+              return source[:start] + replacement.rstrip() + source[end:]
+
+          def replace_method(source, name, next_name, replacement):
+              return replace_block(source, f'  {name}', f'\n  {next_name}', replacement)
+
+          text = text.replace('export const KINGFISHER_VERSION = "2.0.0";', 'export const KINGFISHER_VERSION = "3.0.0";', 1)
+          text = text.replace('  sensitivity: 1,\n  assist: 0.78,', '  sensitivity: 0.96,\n  assist: 0.58,', 1)
+          text = text.replace(
+              'const smooth = (rate, dt) => 1 - Math.exp(-rate * dt);',
+              '''const smooth = (rate, dt) => 1 - Math.exp(-rate * dt);\nconst wrapAngle = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));\nconst smoothstep = (edge0, edge1, value) => {\n  const t = clamp((value - edge0) / Math.max(1e-6, edge1 - edge0), 0, 1);\n  return t * t * (3 - 2 * t);\n};''',
+              1,
+          )
+
+          make_fish = r'''function makeFish(type) {
+  if (!makeFish.cache) makeFish.cache = new Map();
+  let assets = makeFish.cache.get(type.id);
+  if (!assets) {
+    assets = {
+      bodyGeometry: new THREE.SphereGeometry(0.37, 16, 9),
+      bellyGeometry: new THREE.SphereGeometry(0.31, 12, 7),
+      stripeGeometry: new THREE.BoxGeometry(0.48, 0.065, 1.05),
+      tailGeometry: new THREE.ConeGeometry(0.34, 0.76, 3),
+      dorsalGeometry: new THREE.ConeGeometry(0.2, 0.52, 3),
+      eyeGeometry: new THREE.SphereGeometry(0.045, 7, 5),
+      bodyMaterial: new THREE.MeshStandardMaterial({ color: type.body, roughness: 0.4, metalness: 0.1 }),
+      stripeMaterial: new THREE.MeshStandardMaterial({ color: type.stripe, roughness: 0.46 }),
+      bellyMaterial: new THREE.MeshStandardMaterial({ color: type.belly || 0xd8dfd6, roughness: 0.6 }),
+      finMaterial: new THREE.MeshStandardMaterial({ color: type.stripe, roughness: 0.52, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
+      eyeMaterial: new THREE.MeshStandardMaterial({ color: 0x050708, roughness: 0.2 }),
+    };
+    makeFish.cache.set(type.id, assets);
+  }
+
+  const fish = new THREE.Group();
+  const scale = type.scale || 1;
+  const body = new THREE.Mesh(assets.bodyGeometry, assets.bodyMaterial);
+  body.scale.set(0.7 * scale, 0.58 * scale, 1.55 * scale);
+  fish.add(body);
+
+  const belly = new THREE.Mesh(assets.bellyGeometry, assets.bellyMaterial);
+  belly.scale.set(0.56 * scale, 0.22 * scale, 1.3 * scale);
+  belly.position.y = -0.22 * scale;
+  fish.add(belly);
+
+  const lateral = new THREE.Mesh(assets.stripeGeometry, assets.stripeMaterial);
+  lateral.scale.setScalar(scale);
+  lateral.position.y = 0.03;
+  fish.add(lateral);
+
+  const tail = new THREE.Mesh(assets.tailGeometry, assets.finMaterial);
+  tail.scale.setScalar(scale);
+  tail.rotation.x = Math.PI / 2;
+  tail.position.z = 0.98 * scale;
+  fish.add(tail);
+
+  const dorsal = new THREE.Mesh(assets.dorsalGeometry, assets.finMaterial);
+  dorsal.scale.setScalar(scale);
+  dorsal.rotation.x = Math.PI / 2;
+  dorsal.position.set(0, 0.34 * scale, 0.12 * scale);
+  fish.add(dorsal);
+
+  const detailMeshes = [belly, dorsal];
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(assets.eyeGeometry, assets.eyeMaterial);
+    eye.scale.setScalar(scale);
+    eye.position.set(side * 0.22 * scale, 0.15 * scale, -0.48 * scale);
+    fish.add(eye);
+    detailMeshes.push(eye);
+  }
+
+  fish.userData.type = type;
+  fish.userData.tail = tail;
+  fish.userData.details = detailMeshes;
+  fish.userData.phase = Math.random() * Math.PI * 2;
+  fish.userData.baseX = 0;
+  fish.userData.baseY = -1;
+  fish.userData.speed = rand(1.05, 2.25) * (type.rarity > 3 ? 1.15 : 1);
+  fish.userData.caught = false;
+  fish.userData.school = Math.floor(Math.random() * 8);
+  fish.userData.wiggle = rand(0.8, 1.3);
+  return fish;
+}
+'''
+          text = replace_block(text, 'function makeFish(type) {', '\nfunction makePerch', make_fish)
+
+          constructor_anchor = '''    this.cameraShake = 0;\n    this.recoveryTimer = 0;\n    this.bankBoostTimer = 0;\n    this.slowMotionTimer = 0;\n    this.hitStopTimer = 0;\n'''
+          constructor_replacement = '''    this.cameraShake = 0;\n    this.recoveryTimer = 0;\n    this.surfaceAssistTimer = 0;\n    this.bankBoostTimer = 0;\n    this.slowMotionTimer = 0;\n    this.hitStopTimer = 0;\n    this.filteredSteering = { x: 0, y: 0 };\n    this.yawVelocity = 0;\n    this.pitchVelocity = 0;\n    this.diveBlend = 0;\n    this.diveCancelledUntilRelease = false;\n    this.cameraVelocity = new THREE.Vector3();\n    this.cameraLookVelocity = new THREE.Vector3();\n    this.cameraDesired = new THREE.Vector3();\n    this.cameraLookDesired = new THREE.Vector3();\n    this.cameraAcceleration = new THREE.Vector3();\n    this.cameraLookAcceleration = new THREE.Vector3();\n    this.dynamicPixelRatio = 1;\n    this.qualityElapsed = 0;\n    this.qualityFrameTime = 0;\n    this.qualityFrameCount = 0;\n    this.waterFrame = 0;\n'''
+          if constructor_anchor not in text:
+              raise SystemExit('constructor dynamics anchor missing')
+          text = text.replace(constructor_anchor, constructor_replacement, 1)
+
+          init_renderer = r'''  _initRenderer() {
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const shortSide = typeof window !== "undefined" ? Math.min(window.innerWidth, window.innerHeight) : 1000;
+    const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 8 : 8;
+    this.compactDevice = shortSide < 780 || cores <= 4;
+    this.dynamicPixelRatio = Math.min(dpr, this.compactDevice ? 1.2 : 1.7);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: !this.compactDevice, powerPreference: "high-performance", alpha: false });
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
+    renderer.shadowMap.enabled = !this.compactDevice;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.setPixelRatio(this._desiredPixelRatio());
+    renderer.setSize(Math.max(1, this.mount.clientWidth), Math.max(1, this.mount.clientHeight), false);
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
+    renderer.domElement.style.display = "block";
+    renderer.domElement.style.touchAction = "none";
+    renderer.domElement.setAttribute("aria-label", "3D kingfisher river habitat");
+    this.mount.replaceChildren(renderer.domElement);
+    this.renderer = renderer;
+    this._resize();
+  }
+'''
+          text = replace_method(text, '_initRenderer() {', '_desiredPixelRatio() {', init_renderer)
+
+          desired_ratio = r'''  _desiredPixelRatio() {
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    if (!this.controlSettings.adaptiveQuality) return Math.min(dpr, this.compactDevice ? 1.35 : 2);
+    return clamp(this.dynamicPixelRatio || 1, this.compactDevice ? 0.78 : 0.9, Math.min(dpr, this.compactDevice ? 1.2 : 1.7));
+  }
+'''
+          text = replace_method(text, '_desiredPixelRatio() {', '_buildWorld() {', desired_ratio)
+
+          text = text.replace('    sun.castShadow = true;', '    sun.castShadow = !this.compactDevice;', 1)
+          text = text.replace('    sun.shadow.mapSize.set(1024, 1024);', '    sun.shadow.mapSize.set(this.compactDevice ? 512 : 1024, this.compactDevice ? 512 : 1024);', 1)
+          text = text.replace(
+              'const riverbedGeometry = new THREE.PlaneGeometry(RIVER_HALF_WIDTH * 2.2, WORLD_HALF_LENGTH * 2.2, 20, 140);',
+              'const riverbedGeometry = new THREE.PlaneGeometry(RIVER_HALF_WIDTH * 2.2, WORLD_HALF_LENGTH * 2.2, this.compactDevice ? 12 : 20, this.compactDevice ? 72 : 140);',
+              1,
+          )
+          text = text.replace(
+              'const waterGeometry = new THREE.PlaneGeometry(RIVER_HALF_WIDTH * 2, WORLD_HALF_LENGTH * 2, 24, 128);',
+              'const waterGeometry = new THREE.PlaneGeometry(RIVER_HALF_WIDTH * 2, WORLD_HALF_LENGTH * 2, this.compactDevice ? 16 : 24, this.compactDevice ? 72 : 128);',
+              1,
+          )
+          text = text.replace('    for (let i = 0; i < 105; i += 1) {', '    const stoneCount = this.compactDevice ? 58 : 105;\n    for (let i = 0; i < stoneCount; i += 1) {', 1)
+          text = text.replace('    for (let i = 0; i < 56; i += 1) {', '    const treeCount = this.compactDevice ? 30 : 56;\n    for (let i = 0; i < treeCount; i += 1) {', 1)
+          text = text.replace('    for (let i = 0; i < 130; i += 1) {', '    const reedCount = this.compactDevice ? 66 : 130;\n    for (let i = 0; i < reedCount; i += 1) {', 1)
+          text = text.replace('    for (let i = 0; i < 13; i += 1) {', '    const cloudCount = this.compactDevice ? 7 : 13;\n    for (let i = 0; i < cloudCount; i += 1) {', 1)
+          text = text.replace(
+              'const count = clamp(Math.round(60 * this.habitat.fishDensity), 32, 100);',
+              'const count = clamp(Math.round((this.compactDevice ? 38 : 48) * this.habitat.fishDensity), this.compactDevice ? 24 : 30, this.compactDevice ? 64 : 78);',
+              1,
+          )
+
+          clear_input = r'''  _clearTransientInput() {
+    this.keys.clear();
+    this.pointerDive = false;
+    this.pointerFlap = false;
+    this.gamepadDive = false;
+    this.gamepadFlap = false;
+    this.diveCancelledUntilRelease = false;
+    if (!this.controlSettings.smartDive) this.smartDiveCommit = false;
+    this.steering.x = 0;
+    this.steering.y = 0;
+    this.filteredSteering.x = 0;
+    this.filteredSteering.y = 0;
+    this.yawVelocity = 0;
+    this.pitchVelocity = 0;
+  }
+'''
+          text = replace_method(text, '_clearTransientInput() {', '_resize() {', clear_input)
+
+          set_diving = r'''  setDiving(value) {
+    const next = Boolean(value);
+    if (next && !this.pointerDive) {
+      if (this.controlSettings.smartDive && this.smartDiveCommit) {
+        this._cancelCommittedDive(true);
+        this.diveAttempt = false;
+        this.diveCancelledUntilRelease = true;
+        this._haptic(6);
+      } else {
+        this.diveCancelledUntilRelease = false;
+        this._beginDive();
+      }
+    }
+    this.pointerDive = next;
+    if (!next) {
+      this.diveCancelledUntilRelease = false;
+      this._endDiveButton();
+    }
+  }
+'''
+          text = replace_method(text, 'setDiving(value) {', '_beginDive() {', set_diving)
+
+          begin_dive = r'''  _beginDive() {
+    if (this.holdingFish || !["playing", "countdown"].includes(this.state)) return;
+    this._chooseFishTarget(true);
+    this.diveBlend = 0;
+    this.pitchVelocity *= 0.5;
+    if (this.currentTarget?.visible) {
+      this.lockedTarget = this.currentTarget;
+      this.targetLockAge = 0;
+      if (this.controlSettings.smartDive) this.smartDiveCommit = true;
+      this.callbacks.onEvent?.({ type: "lock" });
+      this._tone(560, 0.05, 0.016);
+      this._haptic(7);
+    } else if (this.controlSettings.smartDive) {
+      this.smartDiveCommit = true;
+    }
+    this.diveAttempt = true;
+    this.diveEnteredWater = false;
+    this.diveCaught = false;
+    this.diveStartHeight = Math.max(this.diveStartHeight, this.bird?.position.y || 0);
+  }
+'''
+          text = replace_method(text, '_beginDive() {', '_endDiveButton() {', begin_dive)
+
+          cancel_dive = r'''  _cancelCommittedDive(clearTarget = true) {
+    this.smartDiveCommit = false;
+    this.diveBlend = 0;
+    if (clearTarget) this.lockedTarget = null;
+  }
+'''
+          text = replace_method(text, '_cancelCommittedDive(clearTarget = true) {', 'unlockAudio() {', cancel_dive)
+
+          reset_run = r'''  _resetRun(mode) {
+    this.mode = mode;
+    this.score = 0;
+    this.catches = 0;
+    this.misses = 0;
+    this.collisions = 0;
+    this.rescues = 0;
+    this.combo = 0;
+    this.bestCombo = 0;
+    this.energy = 1;
+    this.focus = 0;
+    this.focusActive = false;
+    this.focusTime = 0;
+    this.timeBonus = 0;
+    this.perfectDives = 0;
+    this.rareCatches = 0;
+    this.air = 1;
+    this.holdingFish = null;
+    this.holdingValue = 0;
+    this.holdingType = null;
+    this.lastDiveGrade = "";
+    this.runSpecies = {};
+    this.timeRemaining = HUNT_DURATION;
+    this._clearTransientInput();
+    this.smartDiveCommit = false;
+    this.lockedTarget = null;
+    this.currentTarget = null;
+    this.diveAttempt = false;
+    this.diveEnteredWater = false;
+    this.diveCaught = false;
+    this.recoveryTimer = 0;
+    this.surfaceAssistTimer = 0;
+    this.bankBoostTimer = 0;
+    this.slowMotionTimer = 0;
+    this.hitStopTimer = 0;
+    this.diveBlend = 0;
+    this._resetBird();
+    this.fish.forEach((fish, index) => this._placeFish(fish, true, index));
+  }
+'''
+          text = replace_method(text, '_resetRun(mode) {', '_resetBird() {', reset_run)
+
+          reset_bird = r'''  _resetBird() {
+    if (!this.bird) return;
+    this.bird.position.set(-1.2, 7.2, 36);
+    this.previousBirdPosition.copy(this.bird.position);
+    this.yaw = 0;
+    this.pitch = -0.035;
+    this.bank = 0;
+    this.speed = 9.2;
+    this.velocity.set(0, 0, -this.speed);
+    this.forward.set(0, 0, -1);
+    this.filteredSteering.x = 0;
+    this.filteredSteering.y = 0;
+    this.yawVelocity = 0;
+    this.pitchVelocity = 0;
+    this.diveBlend = 0;
+    this.wasUnderwater = false;
+    this.air = 1;
+    this.energy = Math.max(this.energy, 0.88);
+    this.diveStartHeight = this.bird.position.y;
+    this._updateBirdRotation();
+    this.camera.position.copy(this.bird.position).add(new THREE.Vector3(0, 3.2, 8.2));
+    this.cameraLook.copy(this.bird.position).add(new THREE.Vector3(0, 0, -8));
+    this.cameraVelocity.set(0, 0, 0);
+    this.cameraLookVelocity.set(0, 0, 0);
+    this._updateCamera(1 / 60);
+  }
+'''
+          text = replace_method(text, '_resetBird() {', '_emitState() {', reset_bird)
+
+          read_input = r'''  _readInput() {
+    let x = this.steering.x;
+    let y = this.steering.y;
+    if (this.keys.has("KeyA") || this.keys.has("ArrowLeft")) x -= 1;
+    if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) x += 1;
+    if (this.keys.has("KeyW") || this.keys.has("ArrowUp")) y += 1;
+    if (this.keys.has("KeyS") || this.keys.has("ArrowDown")) y -= 1;
+
+    let nextGamepadDive = false;
+    let nextGamepadFlap = false;
+    try {
+      const pads = navigator.getGamepads?.() || [];
+      const pad = Array.from(pads).find(Boolean);
+      if (pad) {
+        const dead = (value) => (Math.abs(value) < 0.08 ? 0 : value);
+        x += dead(pad.axes?.[0] || 0);
+        y += -dead(pad.axes?.[1] || 0);
+        nextGamepadFlap = Boolean(pad.buttons?.[0]?.pressed);
+        nextGamepadDive = Boolean(pad.buttons?.[1]?.pressed || pad.buttons?.[7]?.pressed);
+      }
+    } catch {}
+    if (nextGamepadDive && !this.gamepadDive) this._beginDive();
+    this.gamepadDive = nextGamepadDive;
+    this.gamepadFlap = nextGamepadFlap;
+
+    if (this.controlSettings.invertY) y *= -1;
+    const pointerDive = this.pointerDive && !this.diveCancelledUntilRelease;
+    return {
+      x: clamp(x, -1, 1),
+      y: clamp(y, -1, 1),
+      dive: pointerDive || this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.gamepadDive || this.smartDiveCommit,
+      flap: this.pointerFlap || this.keys.has("Space") || this.gamepadFlap,
+    };
+  }
+'''
+          text = replace_method(text, '_readInput() {', '_updateFlight(dt, elapsed, input) {', read_input)
+
+          update_flight = r'''  _updateFlight(dt, elapsed, input) {
+    const underwater = this.bird.position.y < WATER_Y - 0.06;
+    this.previousBirdPosition.copy(this.bird.position);
+    this.recoveryTimer = Math.max(0, this.recoveryTimer - dt);
+    this.surfaceAssistTimer = Math.max(0, this.surfaceAssistTimer - dt);
+    this.bankBoostTimer = Math.max(0, this.bankBoostTimer - dt);
+
+    const inputRate = underwater ? 11 : 14;
+    this.filteredSteering.x = lerp(this.filteredSteering.x, input.x, smooth(inputRate, dt));
+    this.filteredSteering.y = lerp(this.filteredSteering.y, input.y, smooth(inputRate * 0.86, dt));
+    const steerX = this.filteredSteering.x;
+    const steerY = this.filteredSteering.y;
+
+    if (input.flap && this.smartDiveCommit) this._cancelCommittedDive(true);
+    if (input.dive && !this.holdingFish && !this.lockedTarget?.visible) this._chooseFishTarget(true);
+    if (input.dive && this.currentTarget?.visible && !this.lockedTarget) this.lockedTarget = this.currentTarget;
+
+    const diveActive = input.dive && !this.holdingFish;
+    this.diveBlend = lerp(this.diveBlend, diveActive ? 1 : 0, smooth(diveActive ? 6.8 : 12, dt));
+    const sensitivity = this.controlSettings.sensitivity;
+    const turnAuthority = underwater ? 1.52 : lerp(1.18, 1.72, clamp(this.speed / AIR_DIVE, 0, 1));
+    let desiredYawRate = steerX * turnAuthority * sensitivity;
+    let desiredPitchRate = 0;
+    let targetPitch = steerY * (underwater ? 0.62 : 0.54) * sensitivity;
+    const locked = diveActive && this.lockedTarget?.visible;
+
+    if (locked) {
+      const target = this.lockedTarget;
+      const predicted = this.temp3.copy(target.position);
+      const distance = predicted.distanceTo(this.bird.position);
+      const leadTime = clamp(distance / Math.max(12, this.speed), 0.12, 0.55);
+      predicted.z += target.userData.speed * this.habitat.riverCurrent * leadTime;
+      const toTarget = this.temp2.copy(predicted).sub(this.bird.position);
+      const direct = this.temp.copy(toTarget).normalize();
+      const desiredYaw = Math.atan2(direct.x, -direct.z);
+      const proximity = 1 - smoothstep(6, 55, distance);
+      const profilePitch = lerp(-0.62, -0.25, proximity);
+      const desiredPitch = Math.min(Math.asin(clamp(direct.y, -0.999, 0.95)) - (1 - proximity) * 0.06, profilePitch);
+      const yawError = wrapAngle(desiredYaw - this.yaw);
+      const pitchError = desiredPitch - this.pitch;
+      const assist = clamp(this.controlSettings.assist, 0, 0.92);
+      const lockStrength = assist * lerp(0.45, 1, proximity) * this.diveBlend;
+      const assistedYaw = clamp(yawError * (2.2 + lockStrength * 3.2), -2.3, 2.3);
+      const assistedPitch = clamp(pitchError * (2.6 + lockStrength * 3.8), -2.7, 2.7);
+      desiredYawRate = desiredYawRate * (1 - lockStrength * 0.58) + assistedYaw * lockStrength;
+      desiredPitchRate = steerY * 0.58 + assistedPitch * lockStrength;
+      this.targetLockAge += dt;
+    } else {
+      if (diveActive) targetPitch = Math.min(targetPitch, -0.86);
+      else if (input.flap) targetPitch = Math.max(targetPitch, underwater ? 0.72 : 0.4);
+      else if (this.surfaceAssistTimer > 0) targetPitch = Math.max(targetPitch, underwater ? 0.74 : 0.22);
+      else if (this.holdingFish) targetPitch = Math.max(targetPitch, underwater ? 0.3 : 0.055);
+      else if (!underwater) targetPitch = lerp(targetPitch, this.bird.position.y < 2.2 ? 0.13 : -0.012, 0.34);
+      desiredPitchRate = (targetPitch - this.pitch) * (underwater ? 4.1 : 4.6);
+    }
+
+    if (this.surfaceAssistTimer > 0) {
+      const liftRate = underwater ? 1.55 : 0.72;
+      desiredPitchRate = Math.max(desiredPitchRate, liftRate + steerY * 0.55);
+    }
+
+    this.yawVelocity = lerp(this.yawVelocity, desiredYawRate, smooth(diveActive ? 8.5 : 10.5, dt));
+    this.pitchVelocity = lerp(this.pitchVelocity, desiredPitchRate, smooth(diveActive ? 9.2 : 10.2, dt));
+    this.yaw += this.yawVelocity * dt;
+    this.pitch = clamp(this.pitch + this.pitchVelocity * dt, -1.48, 0.78);
+
+    const bankTarget = clamp(-this.yawVelocity * 0.48 - steerX * 0.14, -MAX_BANK, MAX_BANK);
+    this.bank = lerp(this.bank, bankTarget, smooth(7.4, dt));
+    this.forward.set(
+      Math.sin(this.yaw) * Math.cos(this.pitch),
+      Math.sin(this.pitch),
+      -Math.cos(this.yaw) * Math.cos(this.pitch),
+    ).normalize();
+
+    const wingPower = this.habitat.wingPower;
+    let targetSpeed = underwater ? UNDERWATER_CRUISE * wingPower : AIR_CRUISE * wingPower;
+    if (diveActive) {
+      const diveFactor = clamp((-this.pitch - 0.12) / 1.25, 0, 1);
+      targetSpeed = lerp(targetSpeed, AIR_DIVE * wingPower, 0.46 + diveFactor * 0.54);
+    }
+    if (input.flap && this.energy > 0.02) {
+      targetSpeed += underwater ? 6.2 : 7.2;
+      this.energy = Math.max(0, this.energy - dt * (underwater ? 0.19 : 0.13));
+    } else {
+      this.energy = Math.min(1, this.energy + dt * (underwater ? 0.06 : 0.125));
+    }
+    if (this.surfaceAssistTimer > 0) targetSpeed += underwater ? 5.4 : 2.5;
+    if (this.bankBoostTimer > 0) targetSpeed += 4.2 * clamp(this.bankBoostTimer / 1.25, 0.2, 1);
+    if (this.focusActive) targetSpeed *= 1.1;
+
+    this.speed = lerp(this.speed, targetSpeed, smooth(diveActive ? 3.6 : input.flap ? 5.4 : underwater ? 3.5 : 2.8, dt));
+    this.speed = clamp(this.speed, 4.5, AIR_DIVE * wingPower * 1.12);
+
+    const desiredVelocity = this.temp.copy(this.forward).multiplyScalar(this.speed);
+    if (!underwater) {
+      desiredVelocity.x += Math.sin(elapsed * 0.52 + this.bird.position.z * 0.013) * this.habitat.wind * 0.55;
+      desiredVelocity.x += Math.sin(elapsed * 2.2 + this.bird.position.z * 0.02) * this.habitat.wind * this.habitat.weather * 0.2;
+      if (!diveActive && !input.flap && this.surfaceAssistTimer <= 0) desiredVelocity.y -= 0.22;
+    } else {
+      desiredVelocity.multiplyScalar(0.95);
+      if (this.surfaceAssistTimer > 0) desiredVelocity.y += 2.2;
+    }
+
+    this.velocity.lerp(desiredVelocity, smooth(underwater ? 7.2 : 6.4, dt));
+    this.bird.position.addScaledVector(this.velocity, dt);
+    this.bird.position.y = clamp(this.bird.position.y, RIVERBED_Y - 0.05, 30);
+    this.bird.position.z = this._wrapZ(this.bird.position.z);
+
+    this._checkBoundaries();
+    this._handleWaterTransition(input, dt);
+    this._updateFocus(dt);
+    this._updateBirdRotation();
+  }
+'''
+          text = replace_method(text, '_updateFlight(dt, elapsed, input) {', '_checkBoundaries() {', update_flight)
+
+          handle_water = r'''  _handleWaterTransition(input, dt) {
+    const underwater = this.bird.position.y < WATER_Y - 0.06;
+    if (underwater && !this.wasUnderwater) {
+      this.diveEnteredWater = true;
+      this.diveAttempt = this.diveAttempt || input.dive;
+      this._spawnSplash(this.bird.position, this.speed, false);
+      this.callbacks.onEvent?.({ type: "water" });
+      this._tone(245, 0.065, 0.025);
+      this._haptic(12);
+      this._impactCamera(0.1);
+      this.diveStartHeight = Math.max(this.diveStartHeight, 3);
+    }
+
+    if (!underwater && this.wasUnderwater) {
+      this._spawnSplash(this.bird.position, this.speed * 0.6, true);
+      this.air = Math.max(this.air, 0.68);
+      if (this.diveAttempt && this.diveEnteredWater && !this.diveCaught && !this.holdingFish) {
+        this.misses += 1;
+        this.combo = 0;
+        this.callbacks.onEvent?.({ type: "miss" });
+      }
+      this.diveAttempt = false;
+      this.diveEnteredWater = false;
+      this.diveCaught = false;
+      this._cancelCommittedDive(true);
+    }
+    this.wasUnderwater = underwater;
+
+    if (underwater) {
+      this.air = Math.max(0, this.air - dt * 0.088);
+      this.bubbleAccumulator += 1;
+      if ((input.flap || input.dive) && this.bubbleAccumulator % 6 === 0) this._spawnBubble(this.bird.position);
+      if (this.air <= 0) this.rescue("", 140);
+    } else {
+      this.air = Math.min(1, this.air + dt * 0.55);
+    }
+  }
+'''
+          text = replace_method(text, '_handleWaterTransition(input, dt) {', '_updateFocus(dt) {', handle_water)
+
+          update_fish_start = '''      const distance = flee.length();\n      let fleeX = 0;'''
+          update_fish_repl = '''      const distance = flee.length();\n      const showDetail = distance < 30 || fish === this.currentTarget || fish === this.lockedTarget;\n      if (fish.userData.details) for (const detail of fish.userData.details) detail.visible = showDetail;\n      let fleeX = 0;'''
+          if update_fish_start not in text:
+              raise SystemExit('fish LOD anchor missing')
+          text = text.replace(update_fish_start, update_fish_repl, 1)
+
+          catch_fish = r'''  _catchFish(fish, distance, elapsed) {
+    const type = fish.userData.type;
+    const diveDrop = Math.max(0, this.diveStartHeight - this.bird.position.y);
+    const targetRadius = lerp(1.8, 3.05, clamp(this.controlSettings.assist, 0, 0.92)) * (type.scale || 1);
+    const precision = clamp(1 - distance / Math.max(0.1, targetRadius), 0, 1);
+    const speedQuality = clamp((this.speed - 9) / 13, 0, 1);
+    const dropQuality = clamp((diveDrop - 1.8) / 6.5, 0, 1);
+    const quality = precision * 0.52 + speedQuality * 0.29 + dropQuality * 0.19;
+    const perfect = quality > 0.74;
+    const clean = quality > 0.42;
+    const multiplier = perfect ? 2.05 : clean ? 1.58 : 1.25;
+
+    this.lastDiveGrade = perfect ? "PERFECT" : clean ? "CLEAN" : "CATCH";
+    if (perfect) this.perfectDives += 1;
+    const gross = Math.round(type.value * multiplier);
+    const immediate = Math.max(180, Math.round(gross * 0.66));
+    this.score += immediate;
+    this.holdingFish = type.label;
+    this.holdingType = type;
+    this.holdingValue = Math.max(0, gross - immediate);
+    this.diveCaught = true;
+    this.lastCatchAt = elapsed;
+    this.surfaceAssistTimer = underwater ? 0.78 : 0.42;
+    this.recoveryTimer = 0;
+    this.slowMotionTimer = perfect ? 0.16 : 0.08;
+    this.hitStopTimer = 0;
+    this.speed = Math.max(this.speed, perfect ? 17.5 : 15.5);
+    this.energy = Math.min(1, this.energy + 0.24);
+    fish.visible = false;
+    fish.userData.caught = true;
+    this.currentTarget = null;
+    this.lockedTarget = null;
+    this.smartDiveCommit = false;
+    this.diveBlend = 0;
+    this.focus = Math.min(1, this.focus + (perfect ? 0.54 : 0.32));
+
+    this._spawnCatchBurst(fish.position, type.legendary || perfect);
+    this.callbacks.onEvent?.({ type: "catch", points: immediate, grade: this.lastDiveGrade });
+    this._tone(perfect ? 980 : clean ? 760 : 640, 0.13, 0.04);
+    this._haptic(perfect ? [12, 14, 32] : [14, 14, 24]);
+    this._impactCamera(perfect ? 0.14 : 0.08);
+    this._emitHud(true);
+  }
+'''
+          text = replace_method(text, '_catchFish(fish, distance, elapsed) {', '_bankFish() {', catch_fish)
+
+          bank_fish = r'''  _bankFish() {
+    const type = this.holdingType;
+    if (!type) return;
+    this.catches += 1;
+    this.combo += 1;
+    this.bestCombo = Math.max(this.bestCombo, this.combo);
+    const comboMultiplier = 1 + Math.min(1.55, Math.max(0, this.combo - 1) * 0.17);
+    const bankValue = Math.round(this.holdingValue * comboMultiplier + 180 + this.combo * 34);
+    this.score += bankValue;
+    this.lifetimeCatches += 1;
+    this.runSpecies[type.id] = (this.runSpecies[type.id] || 0) + 1;
+    this.speciesCaught[type.id] = (this.speciesCaught[type.id] || 0) + 1;
+    this.discovered[type.id] = (this.discovered[type.id] || 0) + 1;
+    if (type.rarity >= 3 || type.legendary) this.rareCatches += 1;
+
+    this.bankBoostTimer = 1.25;
+    this.surfaceAssistTimer = 0;
+    this.slowMotionTimer = 0.08;
+    this.speed = Math.max(this.speed, 15.5);
+    const earnedTime = this.mode === "hunt" ? (this.lastDiveGrade === "PERFECT" ? 3.4 : type.legendary ? 5 : type.rarity >= 3 ? 2.1 : 1.05) : 0;
+    if (earnedTime > 0) {
+      this.timeRemaining += earnedTime;
+      this.timeBonus += earnedTime;
+    }
+
+    safeWriteJSON("aspen-kingfisher-lifetime-v2", this.lifetimeCatches);
+    safeWriteJSON("aspen-kingfisher-discovered-v2", this.discovered);
+    safeWriteJSON("aspen-kingfisher-species-v2", this.speciesCaught);
+    this._spawnCatchBurst(this._nearestPerch().position, true);
+    this.callbacks.onEvent?.({ type: "bank", points: bankValue, combo: this.combo });
+    this._tone(type.legendary ? 1100 : 840, 0.16, 0.043);
+    this._haptic(type.legendary ? [20, 24, 20, 24, 38] : [12, 16, 28]);
+
+    const caughtFish = this.fish.find((candidate) => candidate.userData.caught && candidate.userData.type.id === type.id);
+    if (caughtFish) this._placeFish(caughtFish, false);
+    this.holdingFish = null;
+    this.holdingValue = 0;
+    this.holdingType = null;
+    this.lastDiveGrade = "";
+    this.energy = Math.min(1, this.energy + 0.28);
+    this.focus = Math.min(1, this.focus + 0.2);
+    this.diveStartHeight = this.bird.position.y;
+    this._emitHud(true);
+  }
+'''
+          text = replace_method(text, '_bankFish() {', '_impactCamera(amount) {', bank_fish)
+
+          update_camera = r'''  _updateCamera(dt) {
+    if (!this.bird) return;
+    const underwater = this.bird.position.y < WATER_Y - 0.08;
+    const diveActive = (this.pointerDive || this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.gamepadDive || this.smartDiveCommit) && !this.holdingFish;
+    const lockTarget = this.lockedTarget?.visible ? this.lockedTarget : null;
+    const flightDirection = this.temp3.copy(this.velocity);
+    if (flightDirection.lengthSq() < 0.01) flightDirection.copy(this.forward);
+    else flightDirection.normalize();
+    const speedRatio = clamp(this.speed / AIR_DIVE, 0, 1);
+    const baseDistance = (underwater ? 6.8 : diveActive ? lerp(7.8, 6.7, speedRatio) : 8.4) * this.controlSettings.cameraDistance;
+    const height = underwater ? 1.85 : diveActive ? 2.45 : 3.05;
+
+    this.cameraDesired.copy(this.bird.position).addScaledVector(flightDirection, -baseDistance);
+    this.cameraDesired.y += height;
+    const sideOffset = this.bank * 0.38;
+    this.cameraDesired.x += Math.cos(this.yaw) * sideOffset;
+    this.cameraDesired.z += Math.sin(this.yaw) * sideOffset;
+
+    if (this.cameraShake > 0.001 && !this.controlSettings.reducedMotion) {
+      this.cameraDesired.x += rand(-1, 1) * this.cameraShake * 0.45;
+      this.cameraDesired.y += rand(-1, 1) * this.cameraShake * 0.25;
+      this.cameraDesired.z += rand(-1, 1) * this.cameraShake * 0.3;
+      this.cameraShake *= Math.exp(-10 * dt);
+    }
+
+    const cameraFrequency = diveActive ? 7.4 : underwater ? 6.6 : 6.0;
+    this.cameraAcceleration.copy(this.cameraDesired).sub(this.camera.position).multiplyScalar(cameraFrequency * cameraFrequency).addScaledVector(this.cameraVelocity, -2 * cameraFrequency);
+    this.cameraVelocity.addScaledVector(this.cameraAcceleration, dt).clampLength(0, 44);
+    this.camera.position.addScaledVector(this.cameraVelocity, dt);
+
+    this.cameraLookDesired.copy(this.bird.position).addScaledVector(flightDirection, underwater ? 7.5 : 9.5);
+    this.cameraLookDesired.y += underwater ? 0.05 : 0.3;
+    if (lockTarget && diveActive) {
+      const distance = this.bird.position.distanceTo(lockTarget.position);
+      const framing = lerp(0.12, 0.28, 1 - smoothstep(7, 45, distance));
+      this.cameraLookDesired.lerp(lockTarget.position, framing);
+    }
+
+    const lookFrequency = diveActive ? 8.2 : 6.8;
+    this.cameraLookAcceleration.copy(this.cameraLookDesired).sub(this.cameraLook).multiplyScalar(lookFrequency * lookFrequency).addScaledVector(this.cameraLookVelocity, -2 * lookFrequency);
+    this.cameraLookVelocity.addScaledVector(this.cameraLookAcceleration, dt).clampLength(0, 55);
+    this.cameraLook.addScaledVector(this.cameraLookVelocity, dt);
+    this.camera.lookAt(this.cameraLook);
+
+    const targetFov = underwater ? 70 : diveActive ? lerp(66, 73, speedRatio) : 63;
+    this.camera.fov = lerp(this.camera.fov, targetFov, smooth(5.2, dt));
+    this.camera.updateProjectionMatrix();
+  }
+
+  _updateAdaptiveQuality(rawDt) {
+    if (!this.controlSettings.adaptiveQuality || !this.renderer) return;
+    this.qualityElapsed += rawDt;
+    this.qualityFrameTime += rawDt;
+    this.qualityFrameCount += 1;
+    if (this.qualityElapsed < 2.2 || this.qualityFrameCount < 30) return;
+
+    const average = this.qualityFrameTime / this.qualityFrameCount;
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const minimum = this.compactDevice ? 0.78 : 0.9;
+    const maximum = Math.min(dpr, this.compactDevice ? 1.2 : 1.7);
+    let next = this.dynamicPixelRatio;
+    if (average > 0.0215) next -= 0.1;
+    else if (average < 0.0155) next += 0.06;
+    next = clamp(next, minimum, maximum);
+    if (Math.abs(next - this.dynamicPixelRatio) >= 0.045) {
+      this.dynamicPixelRatio = next;
+      this.renderer.setPixelRatio(this._desiredPixelRatio());
+      this.renderer.setSize(Math.max(1, this.mount.clientWidth), Math.max(1, this.mount.clientHeight), false);
+    }
+    this.qualityElapsed = 0;
+    this.qualityFrameTime = 0;
+    this.qualityFrameCount = 0;
+  }
+'''
+          text = replace_method(text, '_updateCamera(dt) {', '_animateWater(elapsed) {', update_camera)
+
+          animate_water = r'''  _animateWater(elapsed) {
+    this.waterFrame += 1;
+    if (this.compactDevice && this.waterFrame % 2 === 1) return;
+    const position = this.water?.geometry?.attributes?.position;
+    if (!position || !this.waterBase) return;
+    const roughness = 1 + this.habitat.weather * 2.2;
+    for (let i = 0; i < position.count; i += 1) {
+      const index = i * 3;
+      const x = this.waterBase[index];
+      const y = this.waterBase[index + 1];
+      const wave = Math.sin(y * 0.11 + elapsed * 1.9) * 0.055 + Math.cos(x * 0.72 + y * 0.025 + elapsed * 1.15) * 0.028 + Math.sin(y * 0.027 - elapsed * 0.8) * 0.035;
+      position.setZ(i, wave * roughness);
+    }
+    position.needsUpdate = true;
+  }
+'''
+          text = replace_method(text, '_animateWater(elapsed) {', '_updateEnvironmentByDepth() {', animate_water)
+
+          animate = r'''  _animate = () => {
+    if (this.destroyed) return;
+    this.frame = requestAnimationFrame(this._animate);
+    const rawDt = Math.min(0.034, Math.max(0.001, this.clock.getDelta()));
+    const dt = rawDt;
+    this.hitStopTimer = Math.max(0, this.hitStopTimer - rawDt);
+    this.slowMotionTimer = Math.max(0, this.slowMotionTimer - rawDt);
+    const elapsed = this.clock.elapsedTime;
+    const input = this._readInput();
+
+    if (this.state === "countdown") {
+      this.countdown = Math.max(0, this.countdown - rawDt);
+      this._chooseFishTarget();
+      if (this.countdown <= 0) {
+        this.state = "playing";
+        this._emitState();
+        this._tone(740, 0.09, 0.028);
+      }
+    } else if (this.state === "playing") {
+      if (this.mode === "hunt") {
+        this.timeRemaining = Math.max(0, this.timeRemaining - rawDt);
+        if (this.timeRemaining <= 0) this._finishHunt();
+      }
+      this._chooseFishTarget();
+      this._updateFlight(dt, elapsed, input);
+      this._updateFish(dt, elapsed);
+      this._checkCatchAndBank(elapsed);
+    } else if (this.state === "menu") {
+      this._chooseFishTarget();
+      this.bird.position.y = 6.3 + Math.sin(elapsed * 1.55) * 0.24;
+      this.yaw = Math.sin(elapsed * 0.24) * 0.16;
+      this.pitch = Math.sin(elapsed * 0.68) * 0.035;
+      this.bank = Math.sin(elapsed * 0.52) * 0.08;
+      this.forward.set(Math.sin(this.yaw), this.pitch, -Math.cos(this.yaw)).normalize();
+      this._updateBirdRotation();
+      this._updateFish(dt, elapsed);
+    }
+
+    this._animateBird(elapsed, input);
+    for (const perch of this.perches) if (perch.userData.marker) perch.userData.marker.rotation.z = elapsed * 0.55;
+    this._animateWater(elapsed);
+    this._updateEffects(rawDt);
+    this._updateEnvironmentByDepth();
+    this._updateCamera(dt);
+    this._updateAdaptiveQuality(rawDt);
+    this._emitHud(false);
+    this.renderer.render(this.scene, this.camera);
+  };
+'''
+          text = replace_method(text, '_animate = () => {', 'destroy() {', animate)
+          engine_path.write_text(text)
+
+          joystick_path = Path('app/components/VirtualJoystick.jsx')
+          joystick_path.write_text(r'''"use client";
+
+import { useEffect, useRef, useState } from "react";
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+function responseCurve(value) {
+  const magnitude = Math.abs(value);
+  if (magnitude < 0.025) return 0;
+  const normalized = clamp((magnitude - 0.025) / 0.975, 0, 1);
+  return Math.sign(value) * (0.52 * normalized + 0.48 * normalized * normalized);
+}
+
+export default function VirtualJoystick({ onChange, disabled = false }) {
+  const zoneRef = useRef(null);
+  const baseRef = useRef(null);
+  const knobRef = useRef(null);
+  const pointerRef = useRef(null);
+  const anchorRef = useRef(null);
+  const [anchor, setAnchor] = useState(null);
+  const [active, setActive] = useState(false);
+
+  const setKnob = (x, y) => {
+    if (knobRef.current) knobRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+  };
+
+  const emit = (dx, dy, radius) => {
+    onChange?.(responseCurve(dx / radius), responseCurve(-dy / radius) * 0.92);
+  };
+
+  const update = (event) => {
+    const zone = zoneRef.current;
+    const anchorPoint = anchorRef.current;
+    if (!zone || !anchorPoint) return;
+    const rect = zone.getBoundingClientRect();
+    const radius = clamp(Math.min(rect.width, rect.height) * 0.23, 58, 82);
+    let dx = event.clientX - rect.left - anchorPoint.x;
+    let dy = event.clientY - rect.top - anchorPoint.y;
+    let distance = Math.hypot(dx, dy);
+
+    if (distance > radius * 1.08) {
+      const follow = distance - radius;
+      anchorPoint.x = clamp(anchorPoint.x + (dx / distance) * follow, radius, Math.max(radius, rect.width - radius));
+      anchorPoint.y = clamp(anchorPoint.y + (dy / distance) * follow, radius, Math.max(radius, rect.height - radius));
+      setAnchor({ ...anchorPoint });
+      dx = event.clientX - rect.left - anchorPoint.x;
+      dy = event.clientY - rect.top - anchorPoint.y;
+      distance = Math.hypot(dx, dy);
+    }
+
+    if (distance > radius) {
+      dx = (dx / distance) * radius;
+      dy = (dy / distance) * radius;
+    }
+    setKnob(dx, dy);
+    emit(dx, dy, radius);
+  };
+
+  const release = (event) => {
+    if (pointerRef.current !== null && event?.pointerId !== undefined && event.pointerId !== pointerRef.current) return;
+    pointerRef.current = null;
+    anchorRef.current = null;
+    setActive(false);
+    setAnchor(null);
+    setKnob(0, 0);
+    onChange?.(0, 0);
+  };
+
+  useEffect(() => {
+    if (disabled) release();
+    return () => onChange?.(0, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disabled]);
+
+  return (
+    <div
+      ref={zoneRef}
+      className={`joystick-zone ${active ? "active" : ""} ${disabled ? "disabled" : ""}`}
+      role="application"
+      aria-label="Flight steering"
+      onPointerDown={(event) => {
+        if (disabled || pointerRef.current !== null) return;
+        event.preventDefault();
+        const rect = event.currentTarget.getBoundingClientRect();
+        const safe = clamp(Math.min(rect.width, rect.height) * 0.25, 72, 96);
+        const nextAnchor = {
+          x: clamp(event.clientX - rect.left, safe, Math.max(safe, rect.width - safe)),
+          y: clamp(event.clientY - rect.top, safe, Math.max(safe, rect.height - safe)),
+        };
+        pointerRef.current = event.pointerId;
+        anchorRef.current = nextAnchor;
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        setAnchor(nextAnchor);
+        setActive(true);
+        setKnob(0, 0);
+        onChange?.(0, 0);
+      }}
+      onPointerMove={(event) => {
+        if (pointerRef.current !== event.pointerId) return;
+        event.preventDefault();
+        update(event);
+      }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onLostPointerCapture={release}
+    >
+      <div
+        ref={baseRef}
+        className={`joystick-base ${active ? "active" : ""}`}
+        style={anchor ? { left: `${anchor.x}px`, top: `${anchor.y}px`, bottom: "auto" } : undefined}
+      >
+        <span className="joystick-axis horizontal" />
+        <span className="joystick-axis vertical" />
+        <span className="joystick-orbit outer" />
+        <span className="joystick-orbit inner" />
+        <div ref={knobRef} className="joystick-knob"><span /></div>
+      </div>
+    </div>
+  );
+}
+''')
+
+          component_path = Path('app/components/KingfisherGame.jsx')
+          component = component_path.read_text()
+          component = component.replace(
+              '''const CONTROL_PRESETS = {\n  assisted: { sensitivity: 0.88, assist: 0.84, cameraDistance: 1.04 },\n  natural: { sensitivity: 1, assist: 0.72, cameraDistance: 1 },\n  direct: { sensitivity: 1.16, assist: 0.18, cameraDistance: 0.94 },\n};''',
+              '''const CONTROL_PRESETS = {\n  assisted: { sensitivity: 0.92, assist: 0.78, cameraDistance: 1.04 },\n  natural: { sensitivity: 0.96, assist: 0.58, cameraDistance: 1 },\n  direct: { sensitivity: 1.05, assist: 0.14, cameraDistance: 0.96 },\n};''',
+              1,
+          )
+          component = component.replace(
+              'const parsed = JSON.parse(window.localStorage.getItem("aspen-kingfisher-controls-v3") || window.localStorage.getItem("aspen-kingfisher-controls-v2") || "null");',
+              'const parsed = JSON.parse(window.localStorage.getItem("aspen-kingfisher-controls-v4") || "null");',
+              1,
+          )
+          component = component.replace(
+              'app = new App({ name: "aspen-kingfisher-river-hunt", version: "2.0.0" }, {}, { autoResize: true });',
+              'app = new App({ name: "aspen-kingfisher-river-hunt", version: "3.0.0" }, {}, { autoResize: true });',
+              1,
+          )
+          component = component.replace(
+              'engineRef.current = engine;',
+              'engineRef.current = engine;\n      if (new URLSearchParams(window.location.search).has("debug")) window.__kingfisherEngine = engine;',
+              1,
+          )
+          component = component.replace(
+              'engineRef.current = null;',
+              'engineRef.current = null;\n      try { delete window.__kingfisherEngine; } catch {}',
+              1,
+          )
+          component = component.replace(
+              'window.localStorage.setItem("aspen-kingfisher-controls-v3", JSON.stringify(settings));',
+              'window.localStorage.setItem("aspen-kingfisher-controls-v4", JSON.stringify(settings));',
+              1,
+          )
+          component_path.write_text(component)
+
+          package_path = Path('package.json')
+          package_data = json.loads(package_path.read_text())
+          package_data['version'] = '3.0.0'
+          package_path.write_text(json.dumps(package_data, indent=2) + '\n')
+
+          health_path = Path('app/api/health/route.js')
+          health = health_path.read_text().replace('version: "2.0.0"', 'version: "3.0.0"')
+          health_path.write_text(health)
+          PY
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Verify production build
+        run: npm run build
+
+      - name: Install browser verifier
+        run: |
+          npm install --no-save --legacy-peer-deps @playwright/test@1.55.0
+          npx playwright install chromium
+
+      - name: Run interaction verification
+        shell: bash
+        run: |
+          npm run start -- --hostname 127.0.0.1 > /tmp/kingfisher-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/ >/dev/null && break
+            sleep 1
+          done
+          mkdir -p /tmp/kingfisher-tests
+          cat > /tmp/kingfisher-tests/flight.spec.js <<'TEST'
+          const { test, expect } = require('@playwright/test');
+
+          test('flight controls are responsive, finite, and smart dive toggles', async ({ page }) => {
+            const errors = [];
+            page.on('pageerror', error => errors.push(String(error)));
+            page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+            await page.goto('http://127.0.0.1:3000/?debug=1', { waitUntil: 'networkidle' });
+            await expect(page.locator('canvas')).toBeVisible();
+            await page.locator('.hero-play').click();
+            await page.waitForSelector('.state-playing', { timeout: 8000 });
+            const engineReady = await page.evaluate(() => Boolean(window.__kingfisherEngine));
+            expect(engineReady).toBeTruthy();
+
+            const before = await page.evaluate(() => ({ yaw: window.__kingfisherEngine.yaw, pitch: window.__kingfisherEngine.pitch }));
+            const zone = page.locator('.joystick-zone');
+            const box = await zone.boundingBox();
+            expect(box).toBeTruthy();
+            await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.55);
+            await page.mouse.down();
+            await page.mouse.move(box.x + box.width * 0.35 + 70, box.y + box.height * 0.55 - 18, { steps: 8 });
+            await page.waitForTimeout(420);
+            await page.mouse.up();
+            const after = await page.evaluate(() => ({
+              yaw: window.__kingfisherEngine.yaw,
+              pitch: window.__kingfisherEngine.pitch,
+              yawVelocity: window.__kingfisherEngine.yawVelocity,
+              pitchVelocity: window.__kingfisherEngine.pitchVelocity,
+              speed: window.__kingfisherEngine.speed,
+              camera: window.__kingfisherEngine.camera.position.toArray(),
+            }));
+            expect(Math.abs(after.yaw - before.yaw)).toBeGreaterThan(0.02);
+            expect(Math.abs(after.yaw - before.yaw)).toBeLessThan(1.3);
+            expect([after.yaw, after.pitch, after.yawVelocity, after.pitchVelocity, after.speed, ...after.camera].every(Number.isFinite)).toBeTruthy();
+
+            const dive = page.locator('.dive-control');
+            await dive.click();
+            await page.waitForTimeout(120);
+            const firstTap = await page.evaluate(() => window.__kingfisherEngine.smartDiveCommit);
+            expect(firstTap).toBeTruthy();
+            await dive.click();
+            await page.waitForTimeout(120);
+            const secondTap = await page.evaluate(() => window.__kingfisherEngine.smartDiveCommit);
+            expect(secondTap).toBeFalsy();
+
+            expect(errors).toEqual([]);
+            await page.screenshot({ path: '/tmp/kingfisher-v3.png' });
+          });
+          TEST
+          npx playwright test /tmp/kingfisher-tests/flight.spec.js --browser=chromium --workers=1 --reporter=line
+
+      - name: Commit verified overhaul
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/smooth-flight-v3.yml
+          git add app/lib/KingfisherGameEngine.js app/components/KingfisherGame.jsx app/components/VirtualJoystick.jsx app/api/health/route.js package.json
+          git commit -m "Replace clunky flight with smooth player-authoritative controller"
+          git push origin HEAD:smooth-flight-v3
