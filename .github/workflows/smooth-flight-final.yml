@@ -1,0 +1,90 @@
+name: Final Smooth Kingfisher Flight v3
+
+on:
+  push:
+    branches: [smooth-flight-v3]
+    paths:
+      - ".github/workflows/smooth-flight-final.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: smooth-flight-v3
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply smooth controller
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/smooth-flight-v3.yml').read_text()
+          start_marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Install dependencies"
+          if start_marker not in source or end_marker not in source:
+              raise SystemExit('controller patch not found')
+          block = source.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          block = '\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines())
+          exec(compile(block, 'smooth_flight_v3_patch.py', 'exec'))
+
+          engine_path = Path('app/lib/KingfisherGameEngine.js')
+          engine = engine_path.read_text()
+          anchor = '    this.renderer?.dispose?.();'
+          clear = '    if (makeFish.cache) makeFish.cache.clear();\n'
+          if clear not in engine:
+              if anchor not in engine:
+                  raise SystemExit('dispose anchor not found')
+              engine = engine.replace(anchor, clear + anchor, 1)
+          engine_path.write_text(engine)
+          PY
+
+      - name: Build and install verifier
+        run: |
+          npm install --legacy-peer-deps
+          npm run build
+          npm install --no-save --legacy-peer-deps playwright@1.55.0
+          npx playwright install chromium
+
+      - name: Test controls in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run start -- --hostname 127.0.0.1 > /tmp/kingfisher-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          READY=0
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/ >/dev/null; then READY=1; break; fi
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then cat /tmp/kingfisher-server.log; exit 1; fi
+          if ! node verify-kingfisher.cjs; then
+            cat /tmp/kingfisher-server.log
+            exit 1
+          fi
+
+      - name: Commit verified controller
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm \
+            .github/workflows/smooth-flight-v3.yml \
+            .github/workflows/smooth-flight-run.yml \
+            .github/workflows/smooth-flight-retry.yml \
+            .github/workflows/smooth-flight-final.yml \
+            verify-kingfisher.cjs
+          git add app/lib/KingfisherGameEngine.js app/components/KingfisherGame.jsx app/components/VirtualJoystick.jsx app/api/health/route.js package.json
+          git commit -m "Replace clunky flight with smooth player-authoritative controller"
+          git push origin HEAD:smooth-flight-v3
