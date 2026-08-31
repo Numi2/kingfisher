@@ -2,14 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-function curve(value) {
+function responseCurve(value) {
   const magnitude = Math.abs(value);
-  if (magnitude < 0.04) return 0;
-  return Math.sign(value) * Math.pow((magnitude - 0.04) / 0.96, 1.08);
+  if (magnitude < 0.055) return 0;
+  const normalized = (magnitude - 0.055) / 0.945;
+  return Math.sign(value) * (0.18 * normalized + 0.82 * Math.pow(normalized, 1.42));
 }
 
 export default function VirtualJoystick({ onChange, disabled = false }) {
@@ -20,20 +19,25 @@ export default function VirtualJoystick({ onChange, disabled = false }) {
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const [active, setActive] = useState(false);
 
-  const update = (event, nextAnchor = anchorRef.current) => {
+  const emit = (dx, dy, radius) => {
+    onChange?.(responseCurve(dx / radius), responseCurve(-dy / radius));
+  };
+
+  const update = (event) => {
     const zone = zoneRef.current;
-    if (!zone || !nextAnchor) return;
+    const anchorPoint = anchorRef.current;
+    if (!zone || !anchorPoint) return;
     const rect = zone.getBoundingClientRect();
-    const radius = clamp(Math.min(rect.width, rect.height) * 0.17, 44, 58);
-    let dx = event.clientX - rect.left - nextAnchor.x;
-    let dy = event.clientY - rect.top - nextAnchor.y;
-    const length = Math.hypot(dx, dy);
-    if (length > radius) {
-      dx = (dx / length) * radius;
-      dy = (dy / length) * radius;
+    const radius = clamp(Math.min(rect.width, rect.height) * 0.21, 52, 72);
+    let dx = event.clientX - rect.left - anchorPoint.x;
+    let dy = event.clientY - rect.top - anchorPoint.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance > radius) {
+      dx = (dx / distance) * radius;
+      dy = (dy / distance) * radius;
     }
     setKnob({ x: dx, y: dy });
-    onChange?.(curve(dx / radius), curve(-dy / radius));
+    emit(dx, dy, radius);
   };
 
   const release = (event) => {
@@ -49,7 +53,6 @@ export default function VirtualJoystick({ onChange, disabled = false }) {
   useEffect(() => {
     if (disabled) release();
     return () => onChange?.(0, 0);
-    // `release` intentionally uses only refs and state setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disabled]);
 
@@ -58,15 +61,15 @@ export default function VirtualJoystick({ onChange, disabled = false }) {
       ref={zoneRef}
       className={`joystick-zone ${active ? "active" : ""} ${disabled ? "disabled" : ""}`}
       role="application"
-      aria-label="Floating kingfisher steering control. Drag up to climb, down to descend, and sideways to turn."
+      aria-label="Flight steering"
       onPointerDown={(event) => {
-        if (disabled) return;
+        if (disabled || pointerRef.current !== null) return;
         event.preventDefault();
         const rect = event.currentTarget.getBoundingClientRect();
-        const safeRadius = clamp(Math.min(rect.width, rect.height) * 0.22, 68, 84);
+        const safe = clamp(Math.min(rect.width, rect.height) * 0.24, 66, 90);
         const nextAnchor = {
-          x: clamp(event.clientX - rect.left, safeRadius, Math.max(safeRadius, rect.width - safeRadius)),
-          y: clamp(event.clientY - rect.top, safeRadius, Math.max(safeRadius, rect.height - safeRadius)),
+          x: clamp(event.clientX - rect.left, safe, Math.max(safe, rect.width - safe)),
+          y: clamp(event.clientY - rect.top, safe, Math.max(safe, rect.height - safe)),
         };
         pointerRef.current = event.pointerId;
         anchorRef.current = nextAnchor;
@@ -89,14 +92,14 @@ export default function VirtualJoystick({ onChange, disabled = false }) {
         className={`joystick-base ${active ? "active" : ""}`}
         style={anchor ? { left: `${anchor.x}px`, top: `${anchor.y}px`, bottom: "auto" } : undefined}
       >
-        <div className="joystick-ring" />
-        <div className="joystick-label joystick-up">CLIMB</div>
-        <div className="joystick-label joystick-turn">TURN</div>
+        <span className="joystick-axis horizontal" />
+        <span className="joystick-axis vertical" />
+        <span className="joystick-orbit outer" />
+        <span className="joystick-orbit inner" />
         <div className="joystick-knob" style={{ transform: `translate3d(${knob.x}px, ${knob.y}px, 0)` }}>
           <span />
         </div>
       </div>
-      <div className="joystick-zone-hint">TOUCH + DRAG TO FLY</div>
     </div>
   );
 }
