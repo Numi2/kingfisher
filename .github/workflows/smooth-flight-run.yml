@@ -1,0 +1,120 @@
+name: Run Smooth Kingfisher Flight v3
+
+on:
+  push:
+    branches: [smooth-flight-v3]
+    paths:
+      - ".github/workflows/smooth-flight-run.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  overhaul:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: smooth-flight-v3
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply controller rewrite
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/smooth-flight-v3.yml').read_text()
+          start_marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Install dependencies"
+          if start_marker not in source or end_marker not in source:
+              raise SystemExit('embedded controller patch could not be located')
+          block = source.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          block = '\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines())
+          exec(compile(block, 'smooth_flight_v3_patch.py', 'exec'))
+          PY
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Verify production build
+        run: npm run build
+
+      - name: Install Chromium verifier
+        run: |
+          npm install --no-save --legacy-peer-deps @playwright/test@1.55.0
+          npx playwright install chromium
+
+      - name: Verify real browser interaction
+        shell: bash
+        run: |
+          npm run start -- --hostname 127.0.0.1 > /tmp/kingfisher-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/ >/dev/null && break
+            sleep 1
+          done
+          mkdir -p tests-runtime
+          cat > tests-runtime/flight.spec.cjs <<'TEST'
+          const { test, expect } = require('@playwright/test');
+
+          test('smooth steering and smart-dive toggle', async ({ page }) => {
+            const errors = [];
+            page.on('pageerror', error => errors.push(String(error)));
+            page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+            await page.goto('http://127.0.0.1:3000/?debug=1', { waitUntil: 'networkidle' });
+            await expect(page.locator('canvas')).toBeVisible();
+            await page.locator('.hero-play').click();
+            await page.waitForSelector('.state-playing', { timeout: 8000 });
+            expect(await page.evaluate(() => Boolean(window.__kingfisherEngine))).toBeTruthy();
+
+            const before = await page.evaluate(() => ({ yaw: window.__kingfisherEngine.yaw, pitch: window.__kingfisherEngine.pitch }));
+            const box = await page.locator('.joystick-zone').boundingBox();
+            expect(box).toBeTruthy();
+            await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.55);
+            await page.mouse.down();
+            await page.mouse.move(box.x + box.width * 0.35 + 70, box.y + box.height * 0.55 - 18, { steps: 8 });
+            await page.waitForTimeout(420);
+            await page.mouse.up();
+            const after = await page.evaluate(() => ({
+              yaw: window.__kingfisherEngine.yaw,
+              pitch: window.__kingfisherEngine.pitch,
+              yawVelocity: window.__kingfisherEngine.yawVelocity,
+              pitchVelocity: window.__kingfisherEngine.pitchVelocity,
+              speed: window.__kingfisherEngine.speed,
+              camera: window.__kingfisherEngine.camera.position.toArray(),
+            }));
+            expect(Math.abs(after.yaw - before.yaw)).toBeGreaterThan(0.02);
+            expect(Math.abs(after.yaw - before.yaw)).toBeLessThan(1.3);
+            expect([after.yaw, after.pitch, after.yawVelocity, after.pitchVelocity, after.speed, ...after.camera].every(Number.isFinite)).toBeTruthy();
+
+            const dive = page.locator('.dive-control');
+            await dive.click();
+            await page.waitForTimeout(120);
+            expect(await page.evaluate(() => window.__kingfisherEngine.smartDiveCommit)).toBeTruthy();
+            await dive.click();
+            await page.waitForTimeout(120);
+            expect(await page.evaluate(() => window.__kingfisherEngine.smartDiveCommit)).toBeFalsy();
+            expect(errors).toEqual([]);
+          });
+          TEST
+          npx playwright test tests-runtime/flight.spec.cjs --browser=chromium --workers=1 --reporter=line
+          rm -rf tests-runtime
+
+      - name: Commit verified controller
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/smooth-flight-v3.yml .github/workflows/smooth-flight-run.yml
+          git add app/lib/KingfisherGameEngine.js app/components/KingfisherGame.jsx app/components/VirtualJoystick.jsx app/api/health/route.js package.json
+          git commit -m "Replace clunky flight with smooth player-authoritative controller"
+          git push origin HEAD:smooth-flight-v3
