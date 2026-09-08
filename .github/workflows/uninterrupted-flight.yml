@@ -21,7 +21,23 @@ jobs:
         with:
           node-version: 22
       - name: Integrate flight session repair
-        run: python3 scripts/apply-v4-1.py
+        run: |
+          python3 scripts/apply-v4-1.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/globals.css')
+          p.write_text(p.read_text()+'\n/* Short landscape screens must not push the action controls below the viewport. */\n.game-shell { min-height: 0; height: 100dvh; }\n')
+          p=Path('scripts/verify-session.cjs');s=p.read_text()
+          anchor="   const simBefore=await p.evaluate(()=>window.__kingfisherEngine._simulationTime);"
+          replacement=anchor+'''
+             const targets=await p.locator('.action-controls .flight-control').evaluateAll(elements=>elements.map(el=>{
+               const r=el.getBoundingClientRect();
+               return {label:el.getAttribute('aria-label'),left:r.left,top:r.top,right:r.right,bottom:r.bottom,inViewport:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight};
+             }));
+             assert.ok(targets.every(t=>t.inViewport),'Offscreen action controls: '+JSON.stringify(targets));
+             await p.screenshot({path:`test-artifacts/session-${profile.name}-controls.png`});'''
+          assert s.count(anchor)==1;p.write_text(s.replace(anchor,replacement,1))
+          PY
       - name: Verify motion and build
         run: |
           npm install --legacy-peer-deps
