@@ -8,17 +8,17 @@ on:
       expected_commit:
         description: Exact deployed application commit
         required: true
-        default: '51644a15010b3d632ea798b896f07e37bec67ef1'
+        default: '487453810d099615669c9167f9a46b149fd390f9'
 permissions:
   contents: read
 jobs:
   public-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 6
+    env:
+      EXPECTED_COMMIT: ${{ inputs.expected_commit || '487453810d099615669c9167f9a46b149fd390f9' }}
     steps:
-      - name: Check public pages, version, source commit and JavaScript assets
-        env:
-          EXPECTED_COMMIT: ${{ inputs.expected_commit || '51644a15010b3d632ea798b896f07e37bec67ef1' }}
+      - name: Check public pages, source identity and JavaScript assets
         run: |
           python3 - <<'PY'
           import json, os, re, time
@@ -26,59 +26,69 @@ jobs:
           from urllib.parse import urljoin, urlsplit
           from html.parser import HTMLParser
           from pathlib import Path
-
-          expected = os.environ['EXPECTED_COMMIT']
-          assert re.fullmatch(r'[0-9a-f]{40}', expected), 'Invalid expected commit'
-          base = 'https://kingfisher-zeta.vercel.app'
-          evidence = []
-          def get(path, content_type):
-              url = urljoin(base, path)
-              assert urlsplit(url).netloc == urlsplit(base).netloc
-              # No tokens, credentials, cookie jar or protection bypass headers.
-              request = Request(url, headers={'User-Agent': 'Kingfisher-Public-Smoke/1.0', 'Cache-Control': 'no-cache'})
-              with urlopen(request, timeout=20) as response:
-                  assert response.status == 200, (url, response.status)
-                  assert urlsplit(response.url).netloc == urlsplit(base).netloc, 'Redirected away from public game'
-                  assert content_type in response.headers.get('Content-Type', ''), (url, dict(response.headers))
-                  body = response.read()
-              evidence.append({'path': path, 'status': 200, 'bytes': len(body)})
+          expected=os.environ['EXPECTED_COMMIT']
+          assert re.fullmatch(r'[0-9a-f]{40}',expected)
+          base='https://kingfisher-zeta.vercel.app'
+          evidence=[]
+          def get(path,content_type):
+              url=urljoin(base,path)
+              assert urlsplit(url).netloc==urlsplit(base).netloc
+              request=Request(url,headers={'User-Agent':'Kingfisher-Public-Smoke/1.1','Cache-Control':'no-cache'})
+              with urlopen(request,timeout=20) as response:
+                  assert response.status==200
+                  assert urlsplit(response.url).netloc==urlsplit(base).netloc
+                  assert content_type in response.headers.get('Content-Type','')
+                  body=response.read()
+              evidence.append({'path':path,'status':200,'bytes':len(body)})
               return body
           class Assets(HTMLParser):
               def __init__(self):
-                  super().__init__()
-                  self.scripts = []
-              def handle_starttag(self, tag, attrs):
-                  attributes = dict(attrs)
-                  if tag == 'script' and attributes.get('src', '').startswith('/_next/'):
-                      self.scripts.append(attributes['src'])
+                  super().__init__();self.scripts=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='script' and a.get('src','').startswith('/_next/'):
+                      self.scripts.append(a['src'])
           for attempt in range(4):
               try:
                   evidence.clear()
-                  build = json.loads(get('/build-info.json', 'json'))
-                  assert build.get('sourceCommit') == expected, build
-                  assert build.get('version') == '4.0.0', build
-                  health = json.loads(get('/api/health', 'json'))
-                  assert health.get('ok') is True and health.get('version') == '4.0.0', health
-                  home = get('/', 'html').decode('utf-8')
-                  game = get('/game', 'html').decode('utf-8')
+                  build=json.loads(get('/build-info.json','json'))
+                  assert build.get('sourceCommit')==expected and build.get('version')=='4.1.0',build
+                  health=json.loads(get('/api/health','json'))
+                  assert health.get('ok') is True and health.get('version')=='4.1.0',health
+                  home=get('/','html').decode();game=get('/game','html').decode()
                   assert 'KINGFISHER' in home.upper() and 'KINGFISHER' in game.upper()
-                  parser = Assets(); parser.feed(home)
-                  scripts = list(dict.fromkeys(parser.scripts))
-                  assert scripts, 'Missing application JavaScript'
-                  for script in scripts:
-                      get(script, 'javascript')
-                  result = {'public': True, 'url': base, 'version': build['version'], 'sourceCommit': expected, 'checks': evidence}
-                  Path('public-release-verification.json').write_text(json.dumps(result, indent=2))
-                  print('PUBLIC_LIVE_VERIFIED ' + json.dumps(result))
-                  break
-              except Exception as error:
-                  print(f'Public verification attempt {attempt+1}: {error}', flush=True)
-                  if attempt == 3:
-                      raise
+                  parser=Assets();parser.feed(home)
+                  scripts=list(dict.fromkeys(parser.scripts));assert scripts
+                  for script in scripts:get(script,'javascript')
+                  result={'public':True,'url':base,'version':build['version'],'sourceCommit':expected,'checks':evidence}
+                  Path('public-release-verification.json').write_text(json.dumps(result,indent=2))
+                  print('PUBLIC_LIVE_VERIFIED '+json.dumps(result));break
+              except Exception:
+                  if attempt==3:raise
                   time.sleep(5)
           PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_COMMIT }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install public browser verifier
+        run: |
+          npm install --prefix /tmp/kingfisher-public-check playwright@1.55.0
+          /tmp/kingfisher-public-check/node_modules/.bin/playwright install chromium
+      - name: Exercise production without authentication or bypass cookies
+        env:
+          NODE_PATH: /tmp/kingfisher-public-check/node_modules
+          FLIGHT_BASE_URL: https://kingfisher-zeta.vercel.app
+        run: node source/scripts/verify-session.cjs
       - name: Save public verification evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: public-vercel-release
-          path: public-release-verification.json
+          path: |
+            public-release-verification.json
+            test-artifacts
