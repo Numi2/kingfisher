@@ -1,120 +1,79 @@
 "use client";
-
-import { useEffect, useRef, useState } from "react";
-
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-
-function responseCurve(value) {
-  const magnitude = Math.abs(value);
-  if (magnitude < 0.025) return 0;
-  const normalized = clamp((magnitude - 0.025) / 0.975, 0, 1);
-  return Math.sign(value) * (0.52 * normalized + 0.48 * normalized * normalized);
-}
+import { useEffect, useRef } from 'react';
+import { radialInput, clamp } from '../lib/FlightMotion.mjs';
 
 export default function VirtualJoystick({ onChange, disabled = false }) {
   const zoneRef = useRef(null);
   const baseRef = useRef(null);
   const knobRef = useRef(null);
-  const pointerRef = useRef(null);
-  const anchorRef = useRef(null);
-  const [anchor, setAnchor] = useState(null);
-  const [active, setActive] = useState(false);
-
-  const setKnob = (x, y) => {
-    if (knobRef.current) knobRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-  };
-
-  const emit = (dx, dy, radius) => {
-    onChange?.(responseCurve(dx / radius), responseCurve(-dy / radius) * 0.92);
-  };
-
-  const update = (event) => {
-    const zone = zoneRef.current;
-    const anchorPoint = anchorRef.current;
-    if (!zone || !anchorPoint) return;
-    const rect = zone.getBoundingClientRect();
-    const radius = clamp(Math.min(rect.width, rect.height) * 0.23, 58, 82);
-    let dx = event.clientX - rect.left - anchorPoint.x;
-    let dy = event.clientY - rect.top - anchorPoint.y;
-    let distance = Math.hypot(dx, dy);
-
-    if (distance > radius * 1.08) {
-      const follow = distance - radius;
-      anchorPoint.x = clamp(anchorPoint.x + (dx / distance) * follow, radius, Math.max(radius, rect.width - radius));
-      anchorPoint.y = clamp(anchorPoint.y + (dy / distance) * follow, radius, Math.max(radius, rect.height - radius));
-      setAnchor({ ...anchorPoint });
-      dx = event.clientX - rect.left - anchorPoint.x;
-      dy = event.clientY - rect.top - anchorPoint.y;
-      distance = Math.hypot(dx, dy);
-    }
-
-    if (distance > radius) {
-      dx = (dx / distance) * radius;
-      dy = (dy / distance) * radius;
-    }
-    setKnob(dx, dy);
-    emit(dx, dy, radius);
-  };
-
-  const release = (event) => {
-    if (pointerRef.current !== null && event?.pointerId !== undefined && event.pointerId !== pointerRef.current) return;
-    pointerRef.current = null;
-    anchorRef.current = null;
-    setActive(false);
-    setAnchor(null);
-    setKnob(0, 0);
-    onChange?.(0, 0);
-  };
+  const callback = useRef(onChange);
+  callback.current = onChange;
 
   useEffect(() => {
-    if (disabled) release();
-    return () => onChange?.(0, 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [disabled]);
+    const zone = zoneRef.current, base = baseRef.current, knob = knobRef.current;
+    let pointer = null, anchor = null, rect = null, radius = 52;
+    const paint = (dx, dy) => {
+      base.style.left = `${anchor.x}px`; base.style.top = `${anchor.y}px`; base.style.bottom = 'auto';
+      knob.style.transform = `translate3d(${dx}px,${dy}px,0)`;
+    };
+    const release = event => {
+      if (pointer === null || (event?.pointerId !== undefined && pointer !== event.pointerId)) return;
+      const id = pointer; pointer = null; anchor = null;
+      zone.classList.remove('active'); base.classList.remove('active');
+      base.style.removeProperty('left'); base.style.removeProperty('top'); base.style.removeProperty('bottom');
+      knob.style.transform = 'translate3d(0,0,0)';
+      callback.current?.(0, 0);
+      try { if (zone.hasPointerCapture(id)) zone.releasePointerCapture(id); } catch {}
+    };
+    const down = event => {
+      if (disabled || pointer !== null || (event.pointerType === 'mouse' && event.button !== 0)) return;
+      event.preventDefault();
+      rect = zone.getBoundingClientRect();
+      radius = clamp(Math.min(rect.width,rect.height)*0.2,42,60);
+      // Input origin is exactly the touchdown position, never a displaced visual center.
+      anchor = { x: event.clientX-rect.left, y: event.clientY-rect.top };
+      pointer = event.pointerId;
+      zone.setPointerCapture(pointer);
+      zone.classList.add('active'); base.classList.add('active');
+      paint(0,0); callback.current?.(0,0);
+    };
+    const move = event => {
+      if (pointer !== event.pointerId || !anchor) return;
+      event.preventDefault();
+      const samples = event.getCoalescedEvents?.();
+      const sample = samples?.length ? samples[samples.length-1] : event;
+      let dx = sample.clientX-rect.left-anchor.x, dy = sample.clientY-rect.top-anchor.y;
+      const length = Math.hypot(dx,dy);
+      if (length > radius) {
+        // Floating origin follows overtravel so reversing direction needs little travel.
+        const excess = length-radius;
+        anchor.x += dx/length*excess; anchor.y += dy/length*excess;
+        dx *= radius/length; dy *= radius/length;
+      }
+      paint(dx,dy);
+      const intent = radialInput(dx/radius,-dy/radius,0.035,true);
+      callback.current?.(intent.x,intent.y);
+    };
+    const visibility = () => { if (document.hidden) release(); };
+    zone.addEventListener('pointerdown',down,{passive:false});
+    zone.addEventListener('pointermove',move,{passive:false});
+    for (const event of ['pointerup','pointercancel','lostpointercapture']) zone.addEventListener(event,release);
+    window.addEventListener('blur',release); window.addEventListener('resize',release);
+    document.addEventListener('visibilitychange',visibility);
+    return () => {
+      release();
+      zone.removeEventListener('pointerdown',down); zone.removeEventListener('pointermove',move);
+      for (const event of ['pointerup','pointercancel','lostpointercapture']) zone.removeEventListener(event,release);
+      window.removeEventListener('blur',release); window.removeEventListener('resize',release);
+      document.removeEventListener('visibilitychange',visibility);
+    };
+  },[disabled]);
 
-  return (
-    <div
-      ref={zoneRef}
-      className={`joystick-zone ${active ? "active" : ""} ${disabled ? "disabled" : ""}`}
-      role="application"
-      aria-label="Flight steering"
-      onPointerDown={(event) => {
-        if (disabled || pointerRef.current !== null) return;
-        event.preventDefault();
-        const rect = event.currentTarget.getBoundingClientRect();
-        const safe = clamp(Math.min(rect.width, rect.height) * 0.25, 72, 96);
-        const nextAnchor = {
-x: clamp(event.clientX - rect.left, safe, Math.max(safe, rect.width - safe)),
-y: clamp(event.clientY - rect.top, safe, Math.max(safe, rect.height - safe)),
-        };
-        pointerRef.current = event.pointerId;
-        anchorRef.current = nextAnchor;
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-        setAnchor(nextAnchor);
-        setActive(true);
-        setKnob(0, 0);
-        onChange?.(0, 0);
-      }}
-      onPointerMove={(event) => {
-        if (pointerRef.current !== event.pointerId) return;
-        event.preventDefault();
-        update(event);
-      }}
-      onPointerUp={release}
-      onPointerCancel={release}
-      onLostPointerCapture={release}
-    >
-      <div
-        ref={baseRef}
-        className={`joystick-base ${active ? "active" : ""}`}
-        style={anchor ? { left: `${anchor.x}px`, top: `${anchor.y}px`, bottom: "auto" } : undefined}
-      >
-        <span className="joystick-axis horizontal" />
-        <span className="joystick-axis vertical" />
-        <span className="joystick-orbit outer" />
-        <span className="joystick-orbit inner" />
-        <div ref={knobRef} className="joystick-knob"><span /></div>
-      </div>
+  return <div ref={zoneRef} className={`joystick-zone ${disabled ? 'disabled' : ''}`} role="application" aria-label="Flight steering: drag to turn and climb" onContextMenu={event => event.preventDefault()}>
+    <div ref={baseRef} className="joystick-base">
+      <span className="joystick-axis horizontal"/><span className="joystick-axis vertical"/>
+      <span className="joystick-orbit outer"/><span className="joystick-orbit inner"/>
+      <div ref={knobRef} className="joystick-knob"><span/></div>
     </div>
-  );
+  </div>;
 }
