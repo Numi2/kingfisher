@@ -312,3 +312,25 @@ button { -webkit-tap-highlight-color: transparent; }
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   .speed-field { display: none; }
 }
+
+/* Flight v4: readable actions, unobstructed playfield and thumb-sized hit targets. */
+.flight-controls .action-controls { position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: grid; grid-template-columns: 76px 86px; grid-template-areas: "brake burst" "dive flap"; gap: 10px; width: auto; height: auto; transform: none; pointer-events: auto; }
+.flight-controls .flight-control { position: relative; inset: auto; margin: 0; width: 100%; height: 78px; border-radius: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.flight-controls .brake-control { grid-area: brake; height: 62px; background: rgba(12,35,43,.8); }
+.flight-controls .burst-control { grid-area: burst; height: 62px; background: rgba(76,58,23,.82); border-color: rgba(255,213,128,.65); }
+.flight-controls .dive-control { grid-area: dive; }
+.flight-controls .flap-control { grid-area: flap; }
+.flight-controls .flight-control .ui-icon { width: 26px; height: 26px; flex: 0 0 26px; }
+.flight-controls .flight-control .action-label { position: relative; z-index: 2; font-size: 10px; font-weight: 800; letter-spacing: .08em; line-height: 1; color: #f1fbff; }
+.flight-controls .flight-control kbd { position: relative; z-index: 2; font-family: inherit; font-size: 8px; line-height: 1.2; opacity: .65; }
+.flight-controls .flight-control:focus-visible { outline: 3px solid #fff2c7; outline-offset: 4px; }
+.flight-controls .flight-control.pressed { transform: scale(.95); filter: brightness(1.22); }
+.flight-controls .action-cooldown { position: absolute; bottom: 0; left: 0; width: 100%; height: 4px; background: #ffe2a0; transform: scaleX(var(--action-cooldown,0)); transform-origin: left; pointer-events: none; }
+.flight-controls .joystick-zone { position: absolute; left: 0; bottom: 0; width: calc(100% - 196px); max-width: 52vw; height: min(240px,55vh); touch-action: none; pointer-events: auto; }
+.joystick-zone.active .joystick-base, .joystick-zone.active .joystick-knob { transition: none !important; }
+.flight-telemetry { position: absolute; left: 50%; bottom: calc(max(18px,env(safe-area-inset-bottom)) + 170px); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 12px; border-radius: 18px; background: rgba(5,25,33,.5); color: #f0fcff; pointer-events: none; white-space: nowrap; font-size: 10px; }
+.flight-telemetry strong { font-size: 11px; letter-spacing: .13em; }
+.flight-telemetry span { opacity: .78; font-variant-numeric: tabular-nums; }
+.flight-help { max-width: 390px; margin: 10px auto 18px; font-size: 11px; line-height: 1.65; color: #b6d5dc; }
+@media (pointer: coarse) { .flight-controls .flight-control kbd { display: none; } }
+@media (max-height: 480px) { .flight-controls .action-controls { grid-template-columns: 68px 78px; gap: 8px; bottom: max(10px,env(safe-area-inset-bottom)); } .flight-controls .flight-control { height: 65px; } .flight-controls .brake-control, .flight-controls .burst-control { height: 52px; } .flight-telemetry { bottom: 18px; } .flight-help { margin: 5px auto 9px; font-size: 10px; } }

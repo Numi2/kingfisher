@@ -352,8 +352,8 @@ export class KingfisherGameEngine extends RiverEngine {
     const wallDt = this._frameTimestamp === null ? 0 : Math.max(0,(timestamp-this._frameTimestamp)/1000);
     this._frameTimestamp = timestamp;
     // A stall pauses safely instead of dropping time, teleporting, or simulating a hidden tab.
-    if (wallDt > 0.25 && ['playing','countdown'].includes(this.state)) this.setPaused(true);
-    const dt = Math.min(0.1,wallDt);
+    if (wallDt > 2.0 && ['playing','countdown'].includes(this.state)) this.setPaused(true);
+    const dt = Math.min(0.25,wallDt);
     const input = this._readInput();
     if (this.state === 'countdown') {
       this.countdown = Math.max(0,this.countdown-wallDt);

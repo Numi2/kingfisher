@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
   const browser = await chromium.launch({channel:'chromium',headless:true,args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist','--disable-dev-shm-usage']});
   try {
     for (const profile of [{name:'desktop',viewport:{width:960,height:600},isMobile:false,hasTouch:false},{name:'touch',viewport:{width:393,height:852},isMobile:true,hasTouch:true}]) {
-      const context = await browser.newContext({...profile,deviceScaleFactor:1});
+      const context = await browser.newContext({viewport:profile.viewport,isMobile:profile.isMobile,hasTouch:profile.hasTouch,deviceScaleFactor:1});
       const page = await context.newPage();
       const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
       page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
@@ -43,8 +43,12 @@ const { chromium } = require('playwright');
       assert.deepEqual(await page.evaluate(()=>({...window.__kingfisherEngine.steering})),{x:0,y:0});
       await page.evaluate(()=>window.__kingfisherEngine._clearTransientInput());
       // Pointer capture cancellation must release action ownership.
-      await page.locator('.brake-control').dispatchEvent('pointerdown',{pointerId:19,pointerType:'touch',button:0}).catch(()=>{});
-      await page.locator('.brake-control').dispatchEvent('pointercancel',{pointerId:19,pointerType:'touch'});
+      await page.locator('.brake-control').evaluate(el=>el.addEventListener('pointerdown',event=>{window.__testPointerId=event.pointerId;},{once:true}));
+      const brakeBox=await page.locator('.brake-control').boundingBox();
+      await page.mouse.move(brakeBox.x+brakeBox.width/2,brakeBox.y+brakeBox.height/2);await page.mouse.down();
+      const pointerId=await page.evaluate(()=>window.__testPointerId);
+      await page.locator('.brake-control').dispatchEvent('pointercancel',{pointerId,pointerType:'mouse'});await page.mouse.up();
+      assert.equal(await page.evaluate(()=>window.__kingfisherEngine._actions.brake.size),0);
       await page.evaluate(()=>window.__kingfisherEngine._clearTransientInput());
       await page.locator('.dive-control').click();
       assert.equal(await page.evaluate(()=>window.__kingfisherEngine.smartDiveCommit),true);

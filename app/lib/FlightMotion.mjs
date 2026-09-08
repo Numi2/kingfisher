@@ -69,7 +69,7 @@ export function stepFlightMotion(s, input, env, dt) {
   let yawRate = x * turnLimit * sensitivity;
   let targetPitch = y * (wet ? 1.18 : 1.06);
   if (Math.abs(y) < 0.035 && !dive) targetPitch = 0;
-  if (dive) targetPitch = clamp(-1.13 + y * 0.98, -1.46, 0.3);
+  if (dive) targetPitch = clamp(-1.13 + y * 2.25, -1.46, 1.18);
 
   // Near-surface clearance is an assist only: explicit down input still wins.
   if (!wet && !dive && y >= -0.08 && p.y < 1.65) targetPitch = Math.max(targetPitch, (1.65 - p.y) * 0.28);
@@ -84,7 +84,7 @@ export function stepFlightMotion(s, input, env, dt) {
     const assist = clamp(finite(env.assist), 0, 0.9);
     const proximity = 1 - smoothstep(4, 42, distance);
     const yawWeight = assist * (0.72 + 0.28 * proximity) * (1 - smoothstep(0.12, 0.68, Math.abs(x)));
-    const pitchWeight = assist * (1 - smoothstep(0.12, 0.68, Math.abs(y)));
+    const pitchWeight = (assist > 0 ? 0.75 + 0.25 * assist : 0) * (1 - smoothstep(0.12, 0.68, Math.abs(y)));
     const targetYaw = Math.atan2(dx, -dz);
     const correction = clamp(wrapAngle(targetYaw - s.yaw) * 5.8, -3.8, 3.8);
     yawRate = yawRate * (1 - yawWeight) + correction * yawWeight;
@@ -94,7 +94,7 @@ export function stepFlightMotion(s, input, env, dt) {
   }
 
   // Exact first-order rate integration gives consistent yaw response at 30/60/120 Hz.
-  const yawResponse = brake ? 29 : x * s.yawVelocity < 0 ? 32 : Math.abs(x) < 0.035 && !dive ? 32 : 24;
+  const yawResponse = brake ? 29 : x * s.yawVelocity < 0 ? 32 : Math.abs(x) < 0.035 && !dive ? 32 : 28;
   const decay = Math.exp(-yawResponse * dt);
   const previousYawRate = s.yawVelocity;
   s.yaw += yawRate * dt + (previousYawRate - yawRate) * (1 - decay) / yawResponse;

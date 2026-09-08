@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import VirtualJoystick from "./VirtualJoystick";
+import FlightAction from "./FlightAction";
 import {
   DEFAULT_CONTROL_SETTINGS,
   DEFAULT_HABITAT,
@@ -9,7 +10,7 @@ import {
   HUNT_DURATION,
   MEDAL_TARGETS,
   KingfisherGameEngine,
-} from "../lib/KingfisherGameEngine";
+} from "../lib/AgileKingfisherEngine";
 
 const EMPTY_HUD = {
   state: "menu",
@@ -136,39 +137,6 @@ function RadialGauge({ value, children, className = "", size = 54 }) {
   );
 }
 
-function HoldControl({ className = "", icon, onHold, disabled = false, active = false }) {
-  const pointer = useRef(null);
-  const [pressed, setPressed] = useState(false);
-  const release = (event) => {
-    if (pointer.current !== null && event?.pointerId !== undefined && pointer.current !== event.pointerId) return;
-    pointer.current = null;
-    setPressed(false);
-    onHold?.(false);
-  };
-  return (
-    <button
-      type="button"
-      className={`flight-control ${className} ${pressed ? "pressed" : ""} ${active ? "active" : ""}`}
-      disabled={disabled}
-      onContextMenu={(event) => event.preventDefault()}
-      onPointerDown={(event) => {
-        if (disabled) return;
-        event.preventDefault();
-        pointer.current = event.pointerId;
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-        setPressed(true);
-        onHold?.(true);
-      }}
-      onPointerUp={release}
-      onPointerCancel={release}
-      onLostPointerCapture={release}
-    >
-      <span className="control-ripple" />
-      {icon}
-    </button>
-  );
-}
-
 function RangeField({ label, value, min, max, step, onChange }) {
   const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
   return (
@@ -248,7 +216,7 @@ export default function KingfisherGame() {
           if (state !== "finished") setFinish(null);
         },
         onEvent: (event) => {
-          if (["water", "lock", "focus", "miss", "collision", "rescue"].includes(event.type)) emitPulse(event.type, 0);
+          if (["water", "lock", "focus", "boost", "miss", "collision", "rescue"].includes(event.type)) emitPulse(event.type, 0);
         },
         onFinish: setFinish,
       }, DEFAULT_HABITAT);
@@ -428,23 +396,23 @@ export default function KingfisherGame() {
             </div>
           ) : null}
 
+          <div className="flight-telemetry" aria-live="off"><strong>{hud.flightAction || "GLIDE"}</strong><span>{Math.round(hud.speed || 0)} m/s{hud.holdingFish ? ` · PERCH ${Math.round(hud.targetDistance || 0)} m` : ""}</span></div>
           <div className="flight-controls">
             <VirtualJoystick disabled={gameState === "countdown"} onChange={(x, y) => engineRef.current?.setSteering(x, y)}/>
             <div className="action-controls">
-              <HoldControl
-                className="dive-control"
-                icon={<DiveIcon/>}
-                active={hud.targetLocked}
-                disabled={gameState === "countdown" || Boolean(hud.holdingFish)}
-                onHold={(value) => engineRef.current?.setDiving(value)}
-              />
-              <HoldControl
-                className="flap-control"
-                icon={<WingIcon/>}
-                active={hud.underwater || Boolean(hud.holdingFish)}
-                disabled={gameState === "countdown"}
-                onHold={(value) => engineRef.current?.setFlapping(value)}
-              />
+              <FlightAction className="brake-control" label="BRAKE" shortcut="X" icon={<PauseIcon/>}
+                hint="Hold to slow down; steer while braking for a sharp turn." active={hud.braking}
+                disabled={gameState === "countdown"} onHold={(v) => engineRef.current?.setBraking(v)}/>
+              <FlightAction className="burst-control" label="BURST" shortcut="E" icon={<BoltIcon/>}
+                hint="Tap for a short acceleration burst. Double-tap FLAP also works." active={hud.boostActive}
+                cooldown={(hud.boostCooldown || 0) / 1.3} disabled={gameState === "countdown"}
+                onHold={(v) => engineRef.current?.setBurst(v)}/>
+              <FlightAction className="dive-control" label="DIVE" shortcut="SHIFT" icon={<DiveIcon/>}
+                hint="Tap to dive at the selected fish. Tap again or FLAP to cancel." active={hud.diving}
+                disabled={gameState === "countdown" || Boolean(hud.holdingFish)} onHold={(v) => engineRef.current?.setDiving(v)}/>
+              <FlightAction className="flap-control" label="FLAP" shortcut="SPACE" icon={<WingIcon/>}
+                hint="Tap for a wingbeat; hold to accelerate. Underwater, flap to surface." active={hud.flapping}
+                disabled={gameState === "countdown"} onHold={(v) => engineRef.current?.setFlapping(v)}/>
             </div>
           </div>
         </>
@@ -461,6 +429,7 @@ export default function KingfisherGame() {
               <div className="brand-bird"><FishIcon/><WingIcon/></div>
               <div className="menu-kicker">ASPEN</div>
               <h1>KINGFISHER</h1>
+              <p className="flight-help">Steer to turn and climb. DIVE to strike. FLAP to recover.<br/>Hold BRAKE for tight turns. Tap BURST to accelerate.</p>
               <div className="primary-menu-actions">
                 <button className="hero-play" type="button" onClick={startHunt}><PlayIcon/><span>HUNT</span></button>
                 <button type="button" onClick={startFree}><WingIcon/><span>FLY</span></button>
@@ -497,9 +466,10 @@ export default function KingfisherGame() {
               <button className="back-button" type="button" onClick={() => setMenuView("home")}><HomeIcon/></button>
               <div className="menu-kicker">FLIGHT</div><h2>CONTROL</h2>
               <div className="preset-grid">
-                <button type="button" onClick={() => setSettings((old) => ({ ...old, ...CONTROL_PRESETS.assisted }))}>EASY</button>
-                <button type="button" className="selected" onClick={() => setSettings((old) => ({ ...old, ...CONTROL_PRESETS.natural }))}>FLOW</button>
-                <button type="button" onClick={() => setSettings((old) => ({ ...old, ...CONTROL_PRESETS.direct }))}>RAW</button>
+                {[["assisted","EASY"],["natural","FLOW"],["direct","RAW"]].map(([id,label]) => {
+                  const selected = Object.entries(CONTROL_PRESETS[id]).every(([key,value]) => Math.abs(settings[key]-value) < 0.005);
+                  return <button key={id} type="button" className={selected ? "selected" : ""} aria-pressed={selected} onClick={() => setSettings(old => ({...old,...CONTROL_PRESETS[id]}))}>{label}</button>;
+                })}
               </div>
               <div className="range-grid">
                 <RangeField label="Steering" value={settings.sensitivity} min={0.6} max={1.55} step={0.01} onChange={(value) => setSettings((old) => ({ ...old, sensitivity: value }))}/>

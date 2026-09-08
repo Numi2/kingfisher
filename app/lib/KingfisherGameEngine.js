@@ -1043,6 +1043,9 @@ export class KingfisherGameEngine {
       lifetimeCatches: this.lifetimeCatches, lastDiveGrade: this.lastDiveGrade, air: this.air, underwater,
       depth: Math.max(0, -this.bird.position.y), altitude: Math.max(0, this.bird.position.y), speed: this.speed,
       holdingFish: this.holdingFish, holdingValue: this.holdingValue,
+      flightAction: this.flightAction || "GLIDE", braking: this._activeInput?.brake || false,
+      diving: this._activeInput?.dive || false, flapping: this._activeInput?.flap || false,
+      boostActive: this.boostTimer > 0, boostCooldown: this.boostCooldown || 0,
       targetLabel: this.holdingFish ? "GOLD PERCH" : locked && this.lockedTarget ? `LOCKED · ${this.lockedTarget.userData.type.label}` : this.currentTarget?.userData?.type?.label || "SCAN THE WATER",
       targetKind: this.holdingFish ? "perch" : this.currentTarget ? "fish" : "none", targetDistance, marker, targetLocked: locked,
       offCourse: Math.abs(this.bird.position.x) > RIVER_HALF_WIDTH + 1.8, activeFish, fishTotal: this.fish.length,
@@ -1404,6 +1407,7 @@ export class KingfisherGameEngine {
     }
   }
   _catchFish(fish, distance, elapsed) {
+    const underwater = this.bird.position.y < WATER_Y - 0.06;
     const type = fish.userData.type;
     const diveDrop = Math.max(0, this.diveStartHeight - this.bird.position.y);
     const targetRadius = lerp(1.8, 3.05, clamp(this.controlSettings.assist, 0, 0.92)) * (type.scale || 1);
@@ -1576,7 +1580,7 @@ export class KingfisherGameEngine {
     for (let i = 0; i < position.count; i += 1) {
       const index = i * 3;
       const x = this.waterBase[index];
-      const y = this.waterBase[index + 1];
+      const y = this.waterBase[index + 1] - this.water.position.z;
       const wave = Math.sin(y * 0.11 + elapsed * 1.9) * 0.055 + Math.cos(x * 0.72 + y * 0.025 + elapsed * 1.15) * 0.028 + Math.sin(y * 0.027 - elapsed * 0.8) * 0.035;
       position.setZ(i, wave * roughness);
     }
