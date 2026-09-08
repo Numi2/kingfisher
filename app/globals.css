@@ -334,3 +334,5 @@ button { -webkit-tap-highlight-color: transparent; }
 .flight-help { max-width: 390px; margin: 10px auto 18px; font-size: 11px; line-height: 1.65; color: #b6d5dc; }
 @media (pointer: coarse) { .flight-controls .flight-control kbd { display: none; } }
 @media (max-height: 480px) { .flight-controls .action-controls { grid-template-columns: 68px 78px; gap: 8px; bottom: max(10px,env(safe-area-inset-bottom)); } .flight-controls .flight-control { height: 65px; } .flight-controls .brake-control, .flight-controls .burst-control { height: 52px; } .flight-telemetry { bottom: 18px; } .flight-help { margin: 5px auto 9px; font-size: 10px; } }
+
+@media (min-aspect-ratio: 1/1) { .flight-telemetry { bottom: max(20px,env(safe-area-inset-bottom)); } }

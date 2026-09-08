@@ -315,7 +315,9 @@ export class KingfisherGameEngine extends RiverEngine {
     this._lastCameraBird.copy(this.bird.position);
     this._cameraYaw += wrapAngle(this.yaw + this.yawVelocity*0.035 - this._cameraYaw) * (1-Math.exp(-13*dt));
     const wet = this.bird.position.y < -0.06;
-    const distance = (wet ? 6.4 : 7.8) * clamp(finite(this.controlSettings.cameraDistance,1),0.78,1.32);
+    // Preserve room around the wings in narrow portrait viewports.
+    const portraitFraming = clamp(0.70 / Math.max(0.3, this.camera.aspect), 1, 1.65);
+    const distance = (wet ? 6.4 : 7.8) * portraitFraming * clamp(finite(this.controlSettings.cameraDistance,1),0.78,1.32);
     const pitch = clamp(this.pitch * 0.48, -0.60, 0.50);
     const direction = this.temp3.set(Math.sin(this._cameraYaw)*Math.cos(pitch), Math.sin(pitch), -Math.cos(this._cameraYaw)*Math.cos(pitch));
     this.cameraDesired.copy(this.bird.position).addScaledVector(direction,-distance); this.cameraDesired.y += wet ? 1.6 : 2.5;

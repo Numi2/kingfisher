@@ -22,6 +22,20 @@ const { chromium } = require('playwright');
       await page.waitForFunction(t=>window.__kingfisherEngine._simulationTime>t+0.02,liveStart,{timeout:15000});
       await page.screenshot({path:`test-artifacts/${profile.name}-playing.png`});
       const buttons=await page.locator('.action-controls .flight-control').count();assert.equal(buttons,4);
+      const framing = await page.evaluate(() => {
+        const e=window.__kingfisherEngine;
+        e.bird.updateMatrixWorld(true); e.camera.updateMatrixWorld(true);
+        const center=e.bird.position.clone().project(e.camera);
+        const width=window.innerWidth,height=window.innerHeight;
+        const telemetry=document.querySelector('.flight-telemetry').getBoundingClientRect();
+        const centerX=(center.x*0.5+0.5)*width, centerY=(-center.y*0.5+0.5)*height;
+        const labelClear=!(centerX>=telemetry.left&&centerX<=telemetry.right&&centerY>=telemetry.top&&centerY<=telemetry.bottom);
+        const left=e.bird.position.clone().set(-2.6,0,0).applyMatrix4(e.bird.matrixWorld).project(e.camera).x;
+        const right=e.bird.position.clone().set(2.6,0,0).applyMatrix4(e.bird.matrixWorld).project(e.camera).x;
+        return {labelClear,left,right};
+      });
+      assert.ok(framing.labelClear,'telemetry overlaps bird center');
+      assert.ok(Math.abs(framing.left)<0.95&&Math.abs(framing.right)<0.95,'wing span does not fit viewport');
       // Freeze only for deterministic controller/DOM regression checks. These are not FPS benchmarks.
       await page.evaluate(()=>{const e=window.__kingfisherEngine;cancelAnimationFrame(e.frame);e._frameTimestamp=null;e.startFreeFlight();});
       const box=await page.locator('.flight-controls .joystick-zone').boundingBox();assert.ok(box&&box.width>100);
