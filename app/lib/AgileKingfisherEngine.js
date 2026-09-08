@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { FlightClock, FlightPadEdges } from './FlightSession.mjs';
 import { KingfisherGameEngine as RiverEngine } from './KingfisherGameEngine';
 import { clamp, finite, damp, wrapAngle, radialInput, springVector, sweptDistance, initializeMotion, stepFlightMotion } from './FlightMotion.mjs';
 export { DEFAULT_CONTROL_SETTINGS, DEFAULT_HABITAT, FISH_TYPES, HUNT_DURATION, MEDAL_TARGETS } from './KingfisherGameEngine';
-export const KINGFISHER_VERSION = '4.0.0';
+export const KINGFISHER_VERSION = '4.1.0';
 
 // Retains the existing habitat, rendering, scoring, collection and effects.
 // This is the sole gameplay controller used by the UI.
@@ -21,7 +22,11 @@ export class KingfisherGameEngine extends RiverEngine {
     this._v4Ready = true;
     initializeMotion(this);
     this._actions = { dive: new Set(), flap: new Set(), brake: new Set(), burst: new Set() };
-    this._padPrevious = {};
+    this.flightClock = new FlightClock();
+    this.padEdges = new FlightPadEdges();
+    this._keyboardNavigation = false;
+    this.pauseHistory = [];
+    this._renderDirty = true;
     this._lastFlapAt = -Infinity;
     this._diveSuppressed = false;
     this._collisionCooldown = 0;
@@ -41,31 +46,54 @@ export class KingfisherGameEngine extends RiverEngine {
   _bindEvents() {
     this._ensureV4();
     const actionFor = code => ({ ShiftLeft: 'dive', ShiftRight: 'dive', Space: 'flap', KeyX: 'brake', KeyC: 'brake', KeyE: 'burst' })[code];
-    this._onResize = () => this._resize();
-    this._onBlur = () => { this.setPaused(true); this._clearTransientInput(); };
-    this._onVisibility = () => { if (document.hidden) this._onBlur(); this._frameTimestamp = null; };
+    this._onResize = () => { this._resize(); this._renderDirty = true; };
+    // Window focus can change while the game remains visible (especially in an iframe).
+    this._onBlur = () => { this._clearTransientInput(); this.flightClock.reset(); };
+    this._onVisibility = () => {
+      this.flightClock.setHidden(document.hidden);
+      this._clearTransientInput();
+      this._renderDirty = true;
+      if (document.hidden) this.audioContext?.suspend?.().catch(() => {});
+      else if (this.controlSettings.sound) this.audioContext?.resume?.().catch(() => {});
+    };
+    this._onPointerInput = () => { this._keyboardNavigation = false; };
+    this._onContextLost = event => { event.preventDefault(); this.flightClock.setContextLost(true); this._clearTransientInput(); };
+    this._onContextRestored = () => { this.flightClock.setContextLost(false); this._renderDirty = true; };
+    this.flightClock.setHidden(document.hidden);
     this._onKeyDown = event => {
-      if (event.metaKey || event.ctrlKey || event.altKey || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(event.target?.tagName) || event.target?.isContentEditable) return;
-      if (event.code === 'Escape' && !event.repeat) { this.setPaused(this.state !== 'paused'); return; }
+      if (event.code === 'Tab') { this._keyboardNavigation = true; return; }
+      if (event.metaKey || event.ctrlKey || event.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName) || event.target?.isContentEditable) return;
+      if (event.code === 'Escape' && !event.repeat) { event.preventDefault(); this.setPaused(this.state !== 'paused', 'keyboard'); return; }
+      // Preserve deliberate Tab-navigation, but a mouse-focused HUD button must not
+      // turn the next Space wingbeat into a native click on Pause.
+      if (this._keyboardNavigation && event.target?.closest?.('button,[role="button"]')) return;
       if (event.code === 'KeyR' && !event.repeat && this.state !== 'menu') { this.restartCurrentMode(); return; }
       if (this.state !== 'playing') return;
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
       this.keys.add(event.code);
       const action = actionFor(event.code);
+      if (action) { event.preventDefault(); event.stopPropagation(); }
       if (action && !event.repeat) this._setAction(action, true, event.code);
       if (event.code === 'KeyT' && !event.repeat) this.rescue('RETURNED TO RIVER', 80);
     };
-    this._onKeyUp = event => { this.keys.delete(event.code); const action = actionFor(event.code); if (action) this._setAction(action, false, event.code); };
+    this._onKeyUp = event => {
+      const held = this.keys.delete(event.code), action = actionFor(event.code);
+      if (action && held) { event.preventDefault(); event.stopPropagation(); this._setAction(action, false, event.code); }
+    };
     window.addEventListener('resize', this._onResize, { passive: true });
     window.addEventListener('blur', this._onBlur);
     document.addEventListener('visibilitychange', this._onVisibility);
-    window.addEventListener('keydown', this._onKeyDown, { passive: false });
-    window.addEventListener('keyup', this._onKeyUp);
+    window.addEventListener('keydown', this._onKeyDown, { passive: false, capture: true });
+    window.addEventListener('keyup', this._onKeyUp, { capture: true });
+    window.addEventListener('pointerdown', this._onPointerInput, { capture: true, passive: true });
+    this.renderer.domElement.addEventListener('webglcontextlost', this._onContextLost);
+    this.renderer.domElement.addEventListener('webglcontextrestored', this._onContextRestored);
   }
 
   _clearTransientInput() {
     this._ensureV4();
     for (const sources of Object.values(this._actions)) sources.clear();
+    this.padEdges.reset();
     super._clearTransientInput();
     this._cancelCommittedDive(true);
     this._diveSuppressed = false;
@@ -143,14 +171,10 @@ export class KingfisherGameEngine extends RiverEngine {
     try { pad = Array.from(navigator.getGamepads?.() || []).find(p => p?.connected); } catch {}
     const stick = radialInput(pad?.axes?.[0] || 0, -(pad?.axes?.[1] || 0), 0.12);
     x += stick.x; y += stick.y;
-    const buttons = { flap: Boolean(pad?.buttons?.[0]?.pressed), dive: Boolean(pad?.buttons?.[1]?.pressed || pad?.buttons?.[7]?.pressed), brake: Boolean(pad?.buttons?.[2]?.pressed || pad?.buttons?.[6]?.pressed), burst: Boolean(pad?.buttons?.[5]?.pressed) };
-    for (const [action, down] of Object.entries(buttons)) {
-      if (down !== Boolean(this._padPrevious[action])) this._setAction(action, down, 'gamepad');
-      this._padPrevious[action] = down;
+    for (const [action, down] of this.padEdges.sample(pad, performance.now())) {
+      if (action === 'pause') { if (down) this.setPaused(this.state !== 'paused', 'gamepad'); }
+      else this._setAction(action, down, 'gamepad');
     }
-    const pause = Boolean(pad?.buttons?.[9]?.pressed);
-    if (pause && !this._padPrevious.pause) this.setPaused(this.state !== 'paused');
-    this._padPrevious.pause = pause;
     const length = Math.max(1, Math.hypot(x, y));
     const flap = this._actions.flap.size > 0 || this.flapPulseTimer > 0;
     const brake = this._actions.brake.size > 0;
@@ -183,7 +207,7 @@ export class KingfisherGameEngine extends RiverEngine {
     this.bankBoostTimer = Math.max(0, this.bankBoostTimer - dt);
     this._collisionCooldown = Math.max(0, this._collisionCooldown - dt);
     // Recompute after catch/cancel within a multi-step frame: stale input cannot re-dive.
-    input = { ...input, dive: input.dive && !this.holdingFish && !this._diveSuppressed && (this.smartDiveCommit || this._actions.dive.size > 0) };
+    input.dive = input.dive && !this.holdingFish && !this._diveSuppressed && (this.smartDiveCommit || this._actions.dive.size > 0);
     const env = this._motionEnvironment;
     Object.assign(env, { underwater: this.bird.position.y < -0.06, sensitivity: this.controlSettings.sensitivity, assist: this.controlSettings.assist, wingPower: this.habitat.wingPower, wind: this.habitat.wind, current: this.habitat.riverCurrent, time: elapsed, target: null });
     if (input.dive) {
@@ -239,7 +263,7 @@ export class KingfisherGameEngine extends RiverEngine {
       for (const fish of this.fish) if (fish.userData.previousPosition) fish.userData.previousPosition.z += shift;
       if (this.sun?.target) { this.sun.target.position.z += shift; this.sun.target.updateMatrixWorld(); }
     }
-    for (const object of [...this.fish, ...this.perches, ...this.decor]) {
+    for (const group of [this.fish, this.perches, this.decor]) for (const object of group) {
       const before = object.position.z;
       object.position.z = this._wrapZ(before);
       if (object.userData.previousPosition) object.userData.previousPosition.z += object.position.z - before;
@@ -295,6 +319,7 @@ export class KingfisherGameEngine extends RiverEngine {
   _resetBird() {
     this._ensureV4(); initializeMotion(this); this._cameraYaw = 0; this._lastCameraBird = null;
     super._resetBird(); this._previousForward.copy(this.forward); this._collisionCooldown = 0;
+    this.flightClock.reset(); this._renderDirty = true;
     this.lastCatchAt = -Infinity;
     if (this._carryMesh) this._carryMesh.visible = false;
   }
@@ -349,20 +374,37 @@ export class KingfisherGameEngine extends RiverEngine {
     if (tail) { tail.rotation.y = this.bank*0.26; tail.rotation.x = this.brakeBlend*0.34-this.pitch*0.09; tail.scale.x = 1+this.brakeBlend*0.7; }
   }
 
+  _focusFlight() {
+    this._keyboardNavigation = false;
+    this.mount?.closest?.('.game-shell')?.focus?.({ preventScroll: true });
+  }
+
+  setPaused(value, reason = 'manual') {
+    if (value && !['manual', 'keyboard', 'gamepad'].includes(reason)) return;
+    const before = this.state;
+    super.setPaused(value);
+    if (this.state !== before) {
+      this.flightClock.reset(); this._renderDirty = true;
+      this.pauseHistory.push({ reason, paused: this.state === 'paused', time: this._simulationTime });
+      if (this.pauseHistory.length > 16) this.pauseHistory.shift();
+      if (!value) this._focusFlight();
+    }
+  }
+  startHunt() { super.startHunt(); this.countdown = 1; this._emitHud(true); this._focusFlight(); }
+  startFreeFlight() { super.startFreeFlight(); this._focusFlight(); }
+
   _tick(timestamp) {
     if (this.destroyed) return;
-    const wallDt = this._frameTimestamp === null ? 0 : Math.max(0,(timestamp-this._frameTimestamp)/1000);
-    this._frameTimestamp = timestamp;
-    // A stall pauses safely instead of dropping time, teleporting, or simulating a hidden tab.
-    if (wallDt > 2.0 && ['playing','countdown'].includes(this.state)) this.setPaused(true);
-    const dt = Math.min(0.25,wallDt);
+    const active = this.state !== 'paused' && this.state !== 'finished';
+    const { delta: dt, raw, steps } = this.flightClock.sample(timestamp, active);
+    if (this.flightClock.suspended) { this.frame = requestAnimationFrame(this._animate); return; }
     const input = this._readInput();
     if (this.state === 'countdown') {
-      this.countdown = Math.max(0,this.countdown-wallDt);
+      this.countdown = Math.max(0, this.countdown - dt);
       if (this.countdown === 0) { this.state = 'playing'; this._emitState(); this._tone(740,0.08,0.02); }
-    } else if (this.state === 'playing') {
-      if (this.mode === 'hunt') { this.timeRemaining = Math.max(0,this.timeRemaining-wallDt); if (!this.timeRemaining) this._finishHunt(); }
-      const steps = Math.max(1,Math.ceil(dt*120)), h = dt/steps;
+    } else if (this.state === 'playing' && steps > 0) {
+      if (this.mode === 'hunt') { this.timeRemaining = Math.max(0,this.timeRemaining-dt); if (!this.timeRemaining) this._finishHunt(); }
+      const h = dt / steps;
       for (let i=0; i<steps && this.state === 'playing'; i++) {
         this._simulationTime += h;
         this._chooseFishTarget(); this._updateFlight(h,this._simulationTime,input);
@@ -373,13 +415,27 @@ export class KingfisherGameEngine extends RiverEngine {
       this.bird.position.y = 6.3+Math.sin(this._simulationTime*1.5)*0.18;
       this._chooseFishTarget(); this._updateFish(dt,this._simulationTime);
     }
-    if (this.state !== 'paused') {
+    const frozen = ['paused','finished'].includes(this.state);
+    if (!frozen) {
       this._animateBird(this._simulationTime,this._activeInput,dt);
       this._animateWater(this._simulationTime); this._updateEffects(dt);
       for (const perch of this.perches) if (perch.userData.marker) perch.userData.marker.rotation.z = this._simulationTime*0.55;
     }
-    this._updateEnvironmentByDepth(); this._updateCamera(dt); this._updateAdaptiveQuality(wallDt); this._emitHud(false);
-    this.renderer.render(this.scene,this.camera);
+    if (!frozen || this._renderDirty) {
+      this._updateEnvironmentByDepth(); this._updateCamera(dt);
+      if (raw > 0 && raw < 0.75 && !frozen) this._updateAdaptiveQuality(raw);
+      this._emitHud(false); this.renderer.render(this.scene,this.camera);
+      this._renderDirty = false;
+    }
     this.frame = requestAnimationFrame(this._animate);
+  }
+
+  destroy() {
+    window.removeEventListener('keydown', this._onKeyDown, true);
+    window.removeEventListener('keyup', this._onKeyUp, true);
+    window.removeEventListener('pointerdown', this._onPointerInput, true);
+    this.renderer?.domElement?.removeEventListener('webglcontextlost', this._onContextLost);
+    this.renderer?.domElement?.removeEventListener('webglcontextrestored', this._onContextRestored);
+    super.destroy();
   }
 }

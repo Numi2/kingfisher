@@ -96,7 +96,7 @@ const { chromium } = require('playwright');
         const oldOffset=e.camera.position.z-e.bird.position.z;const oldTarget=fish.position.z-e.bird.position.z;e._scrollWorld();
         const seamSafe=Math.abs(e.camera.position.z-e.bird.position.z-oldOffset)<1e-9&&Math.abs(fish.position.z-e.bird.position.z-oldTarget)<1e-9&&e.previousBirdPosition.distanceTo(e.bird.position)<0.2;
         e._setAction('dive',true,'touch');e._onBlur();
-        const blurSafe=e.state==='paused'&&!e.smartDiveCommit&&Object.values(e._actions).every(s=>s.size===0);
+        const blurSafe=e.state==='playing'&&!e.smartDiveCommit&&Object.values(e._actions).every(s=>s.size===0);
         e.startFreeFlight();e.renderer.render(e.scene,e.camera);
         return {alignment,yaw,independentSource,caught,banked,seamSafe,blurSafe};
       });

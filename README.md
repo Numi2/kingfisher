@@ -2,7 +2,7 @@
 
 A WebGL kingfisher hunting game built with Next.js and Three.js. Fly over a living river, dive for fish, surface, and return your catch to a marked perch. HUNT is timed; FLY is untimed.
 
-## Flight controls — v4
+## Flight controls — v4.1
 
 | Action | Touch | Keyboard | Gamepad |
 | --- | --- | --- | --- |
@@ -15,7 +15,7 @@ A WebGL kingfisher hunting game built with Next.js and Three.js. Fly over a livi
 
 A FLAP tap gives a short powered wingbeat; holding it accelerates without forcing continuous climbing. Underwater, FLAP initiates surfacing. FLAP or BRAKE cancels a committed dive. Strong steering takes priority over dive assistance. With one-tap dive disabled, hold the dive control instead. BURST consumes energy and has a short cooldown. Fly through the marked perch to bank a held fish.
 
-The controls menu retains EASY, FLOW and RAW presets, custom sensitivity, aim assistance, inverted pitch, camera distance and low-motion options. Scores and the fish collection remain local to the browser. Switching tabs or losing focus pauses the game and clears held actions.
+The controls menu retains EASY, FLOW and RAW presets, custom sensitivity, aim assistance, inverted pitch, camera distance and low-motion options. Scores and the fish collection remain local to the browser. Window-focus changes release held actions without opening a menu. Hidden tabs freeze simulation and the hunt clock, then continue on return. Only an explicit Pause tap, Escape, or a fresh Start press on a standard-mapped gamepad opens the pause menu. A manually paused game stays paused on tab return.
 
 ## Run
 
@@ -46,8 +46,13 @@ npm install --no-save --legacy-peer-deps playwright@1.55.0
 npx playwright install chromium
 # In another terminal: npm run start
 node scripts/verify-flight.cjs
+node scripts/verify-session.cjs
 ```
 
 The motion suite covers steering response and release, reversal, 30/60/120/144 Hz heading consistency, braking, acceleration, underwater recovery, manual override, swept strikes and camera stability. The Chromium suite checks a real HUNT launch and animation, desktop and touch-emulated controls, simultaneous touches, cancellation, burst cooldown, model alignment, a catch/bank cycle and world rebasing. It then freezes rendering for deterministic mechanics assertions; those checks are not frame-rate benchmarks. Screenshots are stored under `test-artifacts/`.
 
 Physical iPhone/iPad, Safari and real gamepad hardware testing remain separate from these automated checks. `?debug=1` exposes the engine only for inspection and development.
+
+## Uninterrupted-flight regression coverage
+
+The session suite covers visible blur while flying, delayed frames, hidden-tab clock suspension, simultaneous steering and flapping, accidental HUD focus, drag rejection on Pause, intentional pause/resume, and initially-held or reconnecting gamepads. Timing helpers cap catch-up work at eight physics steps per rendered frame. They never generate pause commands. Motion and timer advancement use the same bounded delta after a foreground stall. Active flight controls are icon-only and retain accessible labels; BRAKE uses a separate turning symbol, not the Pause icon.

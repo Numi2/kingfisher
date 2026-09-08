@@ -109,12 +109,13 @@ export function stepFlightMotion(s, input, env, dt) {
 
   let targetSpeed = (wet ? 8.5 : 12.5) * power;
   if (dive) targetSpeed = (wet ? 15.5 : 24 + 10 * clamp(-Math.sin(s.pitch), 0, 1)) * power;
-  if (flap && s.energy > 0.025) targetSpeed += wet ? 5.0 : 7.0;
+  const wingAuthority = smoothstep(0, 0.16, s.energy);
+  if (flap) targetSpeed += (wet ? 5.0 : 7.0) * wingAuthority;
   if (burst) targetSpeed = Math.max(targetSpeed, (wet ? 20 : 28) * power);
   if (s.bankBoostTimer > 0) targetSpeed += 3 * Math.min(1, s.bankBoostTimer / 1.25);
   if (s.focusActive) targetSpeed *= 1.06;
   if (brake) targetSpeed = wet ? 3.8 : 4.8;
-  if (flap && s.energy > 0.025) s.energy = Math.max(0, s.energy - dt * (wet ? 0.17 : 0.12));
+  if (flap) s.energy = Math.max(0, s.energy - dt * (wet ? 0.17 : 0.12) * wingAuthority);
   else s.energy = Math.min(1, s.energy + dt * (brake ? 0.20 : 0.14));
   s.speed = damp(s.speed, targetSpeed, brake ? 11 : burst ? 10 : flap ? 7 : dive ? 6 : 3.8, dt);
 

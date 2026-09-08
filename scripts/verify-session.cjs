@@ -39,6 +39,12 @@ const { chromium } = require('playwright');
    await p.waitForFunction(t=>window.__kingfisherEngine._simulationTime>t+.02,before,{timeout:15000});
    assert.equal(await p.locator('.pause-layer').count(),0,'visible blur opened pause UI');
    const simBefore=await p.evaluate(()=>window.__kingfisherEngine._simulationTime);
+   const targets=await p.locator('.action-controls .flight-control').evaluateAll(elements=>elements.map(el=>{
+     const r=el.getBoundingClientRect();
+     return {label:el.getAttribute('aria-label'),left:r.left,top:r.top,right:r.right,bottom:r.bottom,inViewport:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight};
+   }));
+   assert.ok(targets.every(t=>t.inViewport),'Offscreen action controls: '+JSON.stringify(targets));
+   await p.screenshot({path:`test-artifacts/session-${profile.name}-controls.png`});
    if(profile.touch){
     const cdp=await ctx.newCDPSession(p);
     const z=await p.locator('.flight-controls .joystick-zone').boundingBox();

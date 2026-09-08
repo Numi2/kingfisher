@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import VirtualJoystick from "./VirtualJoystick";
 import FlightAction from "./FlightAction";
+import PauseButton from "./PauseButton";
 import {
   DEFAULT_CONTROL_SETTINGS,
   DEFAULT_HABITAT,
@@ -76,6 +77,10 @@ function WingIcon({ className = "" }) {
 
 function DiveIcon({ className = "" }) {
   return <Icon className={className}><path d="M11 2h2v12.2l4.3-4.3 1.4 1.4L12 18l-6.7-6.7 1.4-1.4 4.3 4.3V2Z"/><path d="M5 21h14" className="icon-line"/></Icon>;
+}
+
+function BrakeIcon() {
+  return <Icon><path d="M3 5v8a7 7 0 0 0 14 0V6l4 4 1.4-1.4L16 2.2l-6.4 6.4L11 10l4-4v7a5 5 0 0 1-10 0V5H3Z"/></Icon>;
 }
 
 function BranchIcon({ className = "" }) {
@@ -284,6 +289,10 @@ export default function KingfisherGame() {
     try { window.localStorage.setItem("aspen-kingfisher-controls-v4", JSON.stringify(settings)); } catch {}
   }, [settings]);
 
+  useEffect(() => {
+    if (gameState === 'paused') document.querySelector('.pause-grid .resume')?.focus({ preventScroll: true });
+  }, [gameState]);
+
   const startHunt = () => {
     previousScore.current = 0;
     setMenuView("home");
@@ -341,7 +350,7 @@ export default function KingfisherGame() {
   const eventClass = pulse ? `pulse-${pulse.type}` : "";
 
   return (
-    <main className={`game-shell state-${gameState} ${hud.underwater ? "is-underwater" : ""} ${hud.targetLocked ? "has-lock" : ""} ${hud.holdingFish ? "has-catch" : ""} ${fast ? "is-fast" : ""} ${veryFast ? "is-very-fast" : ""} ${hud.focusActive ? "is-focus" : ""} ${eventClass}`}>
+    <main tabIndex={-1} aria-label="Kingfisher flight game" className={`game-shell state-${gameState} ${hud.underwater ? "is-underwater" : ""} ${hud.targetLocked ? "has-lock" : ""} ${hud.holdingFish ? "has-catch" : ""} ${fast ? "is-fast" : ""} ${veryFast ? "is-very-fast" : ""} ${hud.focusActive ? "is-focus" : ""} ${eventClass}`}>
       <div ref={mountRef} className="render-mount" />
       <div className="cinematic-vignette" />
       <div className="speed-field"><i/><i/><i/><i/><i/><i/><i/><i/></div>
@@ -363,7 +372,7 @@ export default function KingfisherGame() {
             <div className={`combo-orb ${hud.combo > 1 ? "charged" : ""}`}><BoltIcon/><strong>{Math.max(1, hud.combo || 1)}</strong></div>
             <div className="hud-tools">
               <button type="button" onClick={() => engineRef.current?.rescue("", 80)} aria-label="Return"><ReturnIcon/></button>
-              <button type="button" onClick={() => engineRef.current?.setPaused(true)} aria-label="Pause"><PauseIcon/></button>
+              <PauseButton onPause={() => engineRef.current?.setPaused(true)}><PauseIcon/></PauseButton>
             </div>
           </div>
 
@@ -396,11 +405,11 @@ export default function KingfisherGame() {
             </div>
           ) : null}
 
-          <div className="flight-telemetry" aria-live="off"><strong>{hud.flightAction || "GLIDE"}</strong><span>{Math.round(hud.speed || 0)} m/s{hud.holdingFish ? ` · PERCH ${Math.round(hud.targetDistance || 0)} m` : ""}</span></div>
+          <div className="flight-telemetry" aria-label={`${hud.flightAction || "GLIDE"}, ${Math.round(hud.speed || 0)} metres per second`}><BoltIcon/><span>{Math.round(hud.speed || 0)}</span></div>
           <div className="flight-controls">
             <VirtualJoystick disabled={gameState === "countdown"} onChange={(x, y) => engineRef.current?.setSteering(x, y)}/>
             <div className="action-controls">
-              <FlightAction className="brake-control" label="BRAKE" shortcut="X" icon={<PauseIcon/>}
+              <FlightAction className="brake-control" label="BRAKE" shortcut="X" icon={<BrakeIcon/>}
                 hint="Hold to slow down; steer while braking for a sharp turn." active={hud.braking}
                 disabled={gameState === "countdown"} onHold={(v) => engineRef.current?.setBraking(v)}/>
               <FlightAction className="burst-control" label="BURST" shortcut="E" icon={<BoltIcon/>}
@@ -504,12 +513,12 @@ export default function KingfisherGame() {
       ) : null}
 
       {paused ? (
-        <div className="menu-layer pause-layer"><section className="pause-card">
+        <div className="menu-layer pause-layer" role="dialog" aria-modal="true" aria-label="Game paused"><section className="pause-card">
           <RadialGauge value={timerProgress} size={96}><strong>{mode === "hunt" ? Math.ceil(hud.timeRemaining) : "∞"}</strong></RadialGauge>
           <div className="pause-grid">
-            <button className="resume" type="button" onClick={() => engineRef.current?.setPaused(false)}><PlayIcon/></button>
-            <button type="button" onClick={() => engineRef.current?.restartCurrentMode()}><RestartIcon/></button>
-            <button type="button" onClick={goMenu}><HomeIcon/></button>
+            <button className="resume" aria-label="Resume flight" type="button" onClick={() => engineRef.current?.setPaused(false)}><PlayIcon/></button>
+            <button type="button" aria-label="Restart flight" onClick={() => engineRef.current?.restartCurrentMode()}><RestartIcon/></button>
+            <button type="button" aria-label="Main menu" onClick={goMenu}><HomeIcon/></button>
           </div>
         </section></div>
       ) : null}
