@@ -1,24 +1,19 @@
-name: Verify public Vercel release
+name: Verify Kingfisher 4.1 public release
 on:
   push:
     branches: [main]
     paths: ['.github/workflows/verify-live-vercel.yml']
   workflow_dispatch:
-    inputs:
-      expected_commit:
-        description: Exact deployed application commit
-        required: true
-        default: '487453810d099615669c9167f9a46b149fd390f9'
 permissions:
   contents: read
 jobs:
   public-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 6
-    env:
-      EXPECTED_COMMIT: ${{ inputs.expected_commit || '487453810d099615669c9167f9a46b149fd390f9' }}
     steps:
       - name: Check public pages, source identity and JavaScript assets
+        env:
+          EXPECTED_COMMIT: 487453810d099615669c9167f9a46b149fd390f9
         run: |
           python3 - <<'PY'
           import json, os, re, time
@@ -69,7 +64,7 @@ jobs:
           PY
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.EXPECTED_COMMIT }}
+          ref: 487453810d099615669c9167f9a46b149fd390f9
           path: source
           persist-credentials: false
       - uses: actions/setup-node@v4
