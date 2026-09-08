@@ -1,0 +1,20 @@
+name: Capture flight source
+on:
+  push:
+    branches: [uninterrupted-flight-v4-1]
+    paths: ['.github/workflows/export-flight-source.yml']
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export tracked source
+        run: git archive --format=zip HEAD -o /tmp/kingfisher-source.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flight-source
+          path: /tmp/kingfisher-source.zip
+          retention-days: 3
