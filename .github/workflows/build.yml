@@ -1,22 +1,20 @@
 name: Build Kingfisher
-
 on:
   push:
     branches: [main]
-    paths:
-      - "app/**"
-      - "baseUrl.js"
-      - "package.json"
-      - ".npmrc"
-      - ".github/workflows/build.yml"
+    paths: ['app/**', 'tests/**', 'scripts/verify-flight.cjs', 'baseUrl.js', 'package.json', '.npmrc', '.github/workflows/build.yml']
+  pull_request:
+    paths: ['app/**', 'tests/**', 'scripts/verify-flight.cjs', 'package.json', '.github/workflows/build.yml']
   workflow_dispatch:
-
 permissions:
   contents: read
-
+concurrency:
+  group: kingfisher-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -26,5 +24,28 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --legacy-peer-deps
+      - name: Verify motion regressions
+        run: npm run test:flight
       - name: Build production app
         run: npm run build
+      - name: Install Chromium verifier
+        run: |
+          npm install --no-save --legacy-peer-deps playwright@1.55.0
+          npx playwright install chromium
+      - name: Verify desktop and touch gameplay
+        run: |
+          npm run start -- --hostname 127.0.0.1 > /tmp/flight-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3000/api/health >/dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/verify-flight.cjs || { cat /tmp/flight-server.log; exit 1; }
+      - name: Save browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kingfisher-flight-evidence
+          path: test-artifacts
+          if-no-files-found: ignore
