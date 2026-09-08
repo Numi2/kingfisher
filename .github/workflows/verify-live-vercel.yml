@@ -1,0 +1,84 @@
+name: Verify public Vercel release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-live-vercel.yml']
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Exact deployed application commit
+        required: true
+        default: '51644a15010b3d632ea798b896f07e37bec67ef1'
+permissions:
+  contents: read
+jobs:
+  public-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check public pages, version, source commit and JavaScript assets
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit || '51644a15010b3d632ea798b896f07e37bec67ef1' }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, time
+          from urllib.request import Request, urlopen
+          from urllib.parse import urljoin, urlsplit
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          expected = os.environ['EXPECTED_COMMIT']
+          assert re.fullmatch(r'[0-9a-f]{40}', expected), 'Invalid expected commit'
+          base = 'https://kingfisher-zeta.vercel.app'
+          evidence = []
+          def get(path, content_type):
+              url = urljoin(base, path)
+              assert urlsplit(url).netloc == urlsplit(base).netloc
+              # No tokens, credentials, cookie jar or protection bypass headers.
+              request = Request(url, headers={'User-Agent': 'Kingfisher-Public-Smoke/1.0', 'Cache-Control': 'no-cache'})
+              with urlopen(request, timeout=20) as response:
+                  assert response.status == 200, (url, response.status)
+                  assert urlsplit(response.url).netloc == urlsplit(base).netloc, 'Redirected away from public game'
+                  assert content_type in response.headers.get('Content-Type', ''), (url, dict(response.headers))
+                  body = response.read()
+              evidence.append({'path': path, 'status': 200, 'bytes': len(body)})
+              return body
+          class Assets(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.scripts = []
+              def handle_starttag(self, tag, attrs):
+                  attributes = dict(attrs)
+                  if tag == 'script' and attributes.get('src', '').startswith('/_next/'):
+                      self.scripts.append(attributes['src'])
+          for attempt in range(4):
+              try:
+                  evidence.clear()
+                  build = json.loads(get('/build-info.json', 'json'))
+                  assert build.get('sourceCommit') == expected, build
+                  assert build.get('version') == '4.0.0', build
+                  health = json.loads(get('/api/health', 'json'))
+                  assert health.get('ok') is True and health.get('version') == '4.0.0', health
+                  home = get('/', 'html').decode('utf-8')
+                  game = get('/game', 'html').decode('utf-8')
+                  assert 'KINGFISHER' in home.upper() and 'KINGFISHER' in game.upper()
+                  parser = Assets(); parser.feed(home)
+                  scripts = list(dict.fromkeys(parser.scripts))
+                  assert scripts, 'Missing application JavaScript'
+                  for script in scripts:
+                      get(script, 'javascript')
+                  result = {'public': True, 'url': base, 'version': build['version'], 'sourceCommit': expected, 'checks': evidence}
+                  Path('public-release-verification.json').write_text(json.dumps(result, indent=2))
+                  print('PUBLIC_LIVE_VERIFIED ' + json.dumps(result))
+                  break
+              except Exception as error:
+                  print(f'Public verification attempt {attempt+1}: {error}', flush=True)
+                  if attempt == 3:
+                      raise
+                  time.sleep(5)
+          PY
+      - name: Save public verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-vercel-release
+          path: public-release-verification.json
